@@ -18,10 +18,13 @@ struct InstanceCreateError {
     }
 };
 
+struct GlfwError {
+};
+
+using Error = std::variant<InstanceCreateError, GlfwError>;
+
 std::ostream& operator<<(std::ostream& os, const InstanceCreateError& err);
-
-using Error = std::variant<InstanceCreateError>;
-
+std::ostream& operator<<(std::ostream& os, const GlfwError& err);
 std::ostream& operator<<(std::ostream& os, const Error& err);
 
 }

@@ -1,11 +1,8 @@
 #pragma once
 
-#define VULKAN_HPP_NO_EXCEPTIONS
-#define VULKAN_HPP_ASSERT [](bool _){}
-#include "vulkan/vulkan.hpp"
-#include "GLFW/glfw3.h"
-
+#include "deps.h"
 #include "error.h"
+#include "window.h"
 
 #include <variant>
 
@@ -13,6 +10,7 @@ namespace app {
 
 class App {
 private:
+    UniqueGlfwWindow window;
     vk::UniqueInstance instance;
 
 public:
@@ -25,7 +23,7 @@ public:
     App& operator=(App&&) = default;
 
 private:
-    App(vk::UniqueInstance&& instance);
+    App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance);
 };
 
 } // namespace app

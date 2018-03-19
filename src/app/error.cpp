@@ -7,6 +7,11 @@ std::ostream& operator<<(std::ostream& os, const InstanceCreateError& err) {
     return os;
 }
 
+std::ostream& operator<<(std::ostream& os, const GlfwError& err) {
+    os << "GlfwError()";
+    return os;
+}
+
 std::ostream& operator<<(std::ostream& os, const Error& err) {
     std::visit([&](auto&& arg){ os << arg; }, err);
     return os;
