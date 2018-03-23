@@ -11,6 +11,7 @@ private:
     vk::UniqueInstance instance;
     vk::UniqueSurfaceKHR surface;
     vk::UniqueDevice device;
+    vk::UniqueSwapchainKHR swapchain;
 
 public:
     static App create();
@@ -25,7 +26,7 @@ public:
 
 private:
     App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSurfaceKHR&& surface,
-        vk::UniqueDevice&& device);
+        vk::UniqueDevice&& device, vk::UniqueSwapchainKHR&& swapchain);
 };
 
 } // namespace app

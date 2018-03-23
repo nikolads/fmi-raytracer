@@ -87,9 +87,86 @@ std::tuple<vk::UniqueDevice, Queues> createDevice(vk::PhysicalDevice physical, v
     );
 
     auto device = physical.createDeviceUnique(deviceInfo, nullptr);
-    auto queues = Queues(device->getQueue(*computeQueue, 0), device->getQueue(*presentQueue, 0));
+    auto queues = Queues {
+        *computeQueue,
+        *presentQueue,
+        device->getQueue(*computeQueue, 0),
+        device->getQueue(*presentQueue, 0)
+    };
 
     return std::make_tuple(std::move(device), queues);
+}
+
+vk::SurfaceFormatKHR chooseFormat(const std::vector<vk::SurfaceFormatKHR>& formats) {
+    auto preferred = vk::SurfaceFormatKHR { vk::Format::eB8G8R8A8Unorm, vk::ColorSpaceKHR::eSrgbNonlinear };
+
+    if (formats.size() == 1 && formats[0].format == vk::Format::eUndefined) {
+        return preferred;
+    }
+
+    if (std::find(formats.begin(), formats.end(), preferred) != formats.end()) {
+        return preferred;
+    }
+
+    throw std::runtime_error("preferred surface format not found");
+}
+
+vk::PresentModeKHR choosePresentMode(const std::vector<vk::PresentModeKHR>& modes) {
+    return std::find(modes.begin(), modes.end(), vk::PresentModeKHR::eMailbox) != modes.end()
+        ? vk::PresentModeKHR::eMailbox
+        : vk::PresentModeKHR::eFifo;
+}
+
+vk::Extent2D chooseExtent(const vk::SurfaceCapabilitiesKHR& capabilities, uint32_t windowWidth, uint32_t windowHeight) {
+    if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() ||
+        capabilities.currentExtent.height != std::numeric_limits<uint32_t>::max())
+    {
+        return capabilities.currentExtent;
+    }
+
+    return vk::Extent2D {
+        std::max(capabilities.minImageExtent.width, std::min(capabilities.maxImageExtent.width, windowWidth)),
+        std::max(capabilities.minImageExtent.height, std::min(capabilities.maxImageExtent.height, windowHeight))
+    };
+}
+
+vk::UniqueSwapchainKHR createSwapchain(vk::PhysicalDevice physical, vk::Device device, vk::SurfaceKHR surface,
+    const Queues& queues, uint32_t windowWidth, uint32_t windowHeight)
+{
+    auto capabilities = physical.getSurfaceCapabilitiesKHR(surface);
+    auto imageCount = capabilities.maxImageCount == 0
+        ? capabilities.minImageCount + 1
+        : std::max(capabilities.minImageCount + 1, capabilities.maxImageCount);
+
+    auto format = chooseFormat(physical.getSurfaceFormatsKHR(surface));
+    auto presentMode = choosePresentMode(physical.getSurfacePresentModesKHR(surface));
+    auto extent = chooseExtent(capabilities, windowWidth, windowHeight);
+
+    vk::SwapchainCreateInfoKHR info;
+    if (queues.compute == queues.present) {
+        info = vk::SwapchainCreateInfoKHR(
+            vk::SwapchainCreateFlagBitsKHR(),       // flags
+            surface,                                // surface
+            imageCount,                             // minImageCount
+            format.format,                          // imageFormat
+            format.colorSpace,                      // imageColorSpace
+            extent,                                 // imageExtent
+            1,                                      // imageArrayLayers
+            vk::ImageUsageFlagBits::eTransferDst,   // imageUsage
+            vk::SharingMode::eExclusive,            // imageSharingMode
+            0,                                      // queueFamilyIndexCount
+            nullptr,                                // pQueueFamilyIndices
+            capabilities.currentTransform,          // preTransform
+            vk::CompositeAlphaFlagBitsKHR::eOpaque, // compositeAlpha
+            presentMode,                            // presentMode
+            true,                                   // clipped
+            nullptr                                 // oldSwapchain
+        );
+    } else {
+        throw std::runtime_error("unimplemented");
+    }
+
+    return device.createSwapchainKHRUnique(info, nullptr);
 }
 
 }
