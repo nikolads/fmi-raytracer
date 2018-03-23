@@ -130,7 +130,8 @@ vk::Extent2D chooseExtent(const vk::SurfaceCapabilitiesKHR& capabilities, uint32
     };
 }
 
-vk::UniqueSwapchainKHR createSwapchain(vk::PhysicalDevice physical, vk::Device device, vk::SurfaceKHR surface,
+std::tuple<vk::UniqueSwapchainKHR, vk::SurfaceFormatKHR, vk::Extent2D> createSwapchain(
+    vk::PhysicalDevice physical, vk::Device device, vk::SurfaceKHR surface,
     const Queues& queues, uint32_t windowWidth, uint32_t windowHeight)
 {
     auto capabilities = physical.getSurfaceCapabilitiesKHR(surface);
@@ -152,7 +153,7 @@ vk::UniqueSwapchainKHR createSwapchain(vk::PhysicalDevice physical, vk::Device d
             format.colorSpace,                      // imageColorSpace
             extent,                                 // imageExtent
             1,                                      // imageArrayLayers
-            vk::ImageUsageFlagBits::eTransferDst,   // imageUsage
+            vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst,   // imageUsage
             vk::SharingMode::eExclusive,            // imageSharingMode
             0,                                      // queueFamilyIndexCount
             nullptr,                                // pQueueFamilyIndices
@@ -166,7 +167,35 @@ vk::UniqueSwapchainKHR createSwapchain(vk::PhysicalDevice physical, vk::Device d
         throw std::runtime_error("unimplemented");
     }
 
-    return device.createSwapchainKHRUnique(info, nullptr);
+    auto swapchain = device.createSwapchainKHRUnique(info, nullptr);
+    return std::make_tuple(std::move(swapchain), format, extent);
+}
+
+std::vector<vk::UniqueImageView> createImageViews(vk::Device device, vk::SwapchainKHR swapchain,
+    const vk::SurfaceFormatKHR& format)
+{
+    std::vector<vk::UniqueImageView> views;
+
+    for (auto image: device.getSwapchainImagesKHR(swapchain)) {
+        auto info = vk::ImageViewCreateInfo(
+            vk::ImageViewCreateFlags(),         // flags
+            image,                              // image
+            vk::ImageViewType::e2D,             // viewType
+            format.format,                      // format
+            vk::ComponentMapping(),             // components
+            vk::ImageSubresourceRange(          // subresourceRange
+                vk::ImageAspectFlagBits::eColor,    // aspectMask
+                0,                                  // baseMipLevel
+                1,                                  // levelCount
+                0,                                  // baseArrayLayer
+                1                                   // layerCount
+            )
+        );
+
+        views.push_back(device.createImageViewUnique(info));
+    }
+
+    return views;
 }
 
 }

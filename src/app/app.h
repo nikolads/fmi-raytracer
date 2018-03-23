@@ -1,6 +1,7 @@
 #pragma once
 
 #include "deps.h"
+#include "device.h"
 #include "window.h"
 
 namespace app {
@@ -11,6 +12,7 @@ private:
     vk::UniqueInstance instance;
     vk::UniqueSurfaceKHR surface;
     vk::UniqueDevice device;
+    Queues queues;
     vk::UniqueSwapchainKHR swapchain;
 
 public:
@@ -23,10 +25,10 @@ public:
     App& operator=(App&&) = default;
 
     void mainLoop();
-
+    void drawFrame();
 private:
     App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSurfaceKHR&& surface,
-        vk::UniqueDevice&& device, vk::UniqueSwapchainKHR&& swapchain);
+        vk::UniqueDevice&& device, Queues queues, vk::UniqueSwapchainKHR&& swapchain);
 };
 
 } // namespace app
