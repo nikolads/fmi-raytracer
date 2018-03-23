@@ -1,28 +1,39 @@
 #include "app.h"
+#include "device.h"
 #include "instance.h"
-#include "util.h"
 #include "window.h"
 
 namespace app {
 
-App::App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance):
+App::App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSurfaceKHR&& surface,
+    vk::UniqueDevice&& device):
     window(std::move(window)),
-    instance(std::move(instance))
+    instance(std::move(instance)),
+    surface(std::move(surface)),
+    device(std::move(device))
 {
 }
 
-std::variant<App, Error> App::create() {
-    auto window_result = createWindow(800, 600, "GPU raytracer");
-    RETURN_ON_NONE(window_result, GlfwError);
+App App::create() {
+    auto window = createWindow(800, 600, "GPU raytracer");
+    auto instance = createInstance();
+    auto surface = createSurface(&*window, *instance);
+    auto physical = choosePhysicalDevice(*instance, *surface);
+    auto [device, queues] = createDevice(physical, *surface);
 
-    auto& window = window_result.value();
+    return App(std::move(window), std::move(instance), std::move(surface),
+        std::move(device));
+}
 
-    auto instance_result = createInstance();
-    RETURN_ON_ERROR(instance_result, InstanceCreateError)
+void App::mainLoop() {
+    bool running = true;
 
-    auto& instance = std::get<vk::UniqueInstance>(instance_result);
+    while (running) {
+        glfwPollEvents();
 
-    return App(std::move(window), std::move(instance));
+        running &= !glfwWindowShouldClose(&*this->window);
+        running &= !glfwGetKey(&*this->window, GLFW_KEY_ESCAPE);
+    }
 }
 
 } // namespace app

@@ -20,7 +20,7 @@ build: download-deps
 	@mkdir -p target/$(PROFILE)
 	@$(c++) $(flags) -o target/$(PROFILE)/raytrace 	\
 		src/app/app.cpp								\
-		src/app/error.cpp							\
+		src/app/device.cpp   						\
 		src/app/instance.cpp						\
 		src/app/window.cpp   						\
 		src/main.cpp								\
@@ -33,8 +33,9 @@ download-deps: target/$(PROFILE)/deps/Vulkan-Hpp
 
 target/$(PROFILE)/deps/Vulkan-Hpp:
 	@echo -e " $(c)Downloading$(r) Vulkan-Hpp"
-	@mkdir -p target/$(PROFILE)/deps
-	@cd target/$(PROFILE)/deps && git clone https://github.com/KhronosGroup/Vulkan-Hpp
+	@mkdir -p target/$(PROFILE)/deps/Vulkan-Hpp
+	@git clone https://github.com/KhronosGroup/Vulkan-Hpp target/$(PROFILE)/deps/Vulkan-Hpp
+	@cd target/$(PROFILE)/deps/Vulkan-Hpp && git checkout 141e8ce93b47bbbf7e8217a897a427a56a2d32b1
 
 .PHONY: clean
 clean:

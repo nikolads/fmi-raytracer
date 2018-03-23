@@ -1,5 +1,4 @@
 #include "instance.h"
-#include "util.h"
 
 #include <array>
 #include <experimental/array>
@@ -9,12 +8,12 @@ using std::experimental::make_array;
 
 namespace app {
 
-std::variant<vk::UniqueInstance, vk::Result> createInstance() {
+vk::UniqueInstance createInstance() {
     #ifdef NDEBUG
         const auto validationLayers = make_array<char*>();
     #else
         const auto validationLayers = make_array(
-            "VK_LAYER_LUNARG_api_dump",
+            // "VK_LAYER_LUNARG_api_dump",
             "VK_LAYER_LUNARG_standard_validation"
         );
     #endif
@@ -44,8 +43,7 @@ std::variant<vk::UniqueInstance, vk::Result> createInstance() {
         extensions.data()           //ppEnabledExtensionNames
     );
 
-    auto instance = asVariant(vk::createInstanceUnique(createInfo, nullptr));
-    return instance;
+    return vk::createInstanceUnique(createInfo, nullptr);
 }
 
 } // namespace app

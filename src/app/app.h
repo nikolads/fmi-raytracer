@@ -1,10 +1,7 @@
 #pragma once
 
 #include "deps.h"
-#include "error.h"
 #include "window.h"
-
-#include <variant>
 
 namespace app {
 
@@ -12,9 +9,11 @@ class App {
 private:
     UniqueGlfwWindow window;
     vk::UniqueInstance instance;
+    vk::UniqueSurfaceKHR surface;
+    vk::UniqueDevice device;
 
 public:
-    static std::variant<App, Error> create();
+    static App create();
 
     App(const App&) = delete;
     App& operator=(const App&) = delete;
@@ -22,8 +21,11 @@ public:
     App(App&&) = default;
     App& operator=(App&&) = default;
 
+    void mainLoop();
+
 private:
-    App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance);
+    App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSurfaceKHR&& surface,
+        vk::UniqueDevice&& device);
 };
 
 } // namespace app
