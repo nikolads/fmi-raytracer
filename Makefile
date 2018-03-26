@@ -1,11 +1,5 @@
 PROFILE := debug
 
-c++ := g++
-includes := -Isrc -Itarget/$(PROFILE)/deps/Vulkan-Hpp
-common_flags := -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers $(includes) -lvulkan -lglfw
-debug_flags := $(common_flags) -g -DDEBUG -D_DEBUG
-release_flags := $(common_flags) -O3 -ffast-math -march=native -DNDEBUG
-
 c = \e[35;1m
 r = \e[0m
 
@@ -15,28 +9,36 @@ else
 flags := $(release_flags)
 endif
 
-build: download-deps
+build: build-deps cmake
 	@echo -e "    $(c)Building$(r) raytrace"
-	@mkdir -p target/$(PROFILE)
-	@$(c++) $(flags) -o target/$(PROFILE)/raytrace 	\
-		src/app/app.cpp								\
-		src/app/device.cpp   						\
-		src/app/instance.cpp						\
-		src/app/shader.cpp   						\
-		src/app/window.cpp   						\
-		src/main.cpp								\
+	@make --dir=target/$(PROFILE)
 
 run: build
 	@echo -e "     $(c)Running$(r) raytrace"
 	@target/$(PROFILE)/raytrace
 
-download-deps: target/$(PROFILE)/deps/Vulkan-Hpp
+cmake: target/$(PROFILE)/Makefile
 
-target/$(PROFILE)/deps/Vulkan-Hpp:
+target/debug/Makefile:
+	@mkdir -p target/$(PROFILE)
+	@cmake -Btarget/$(PROFILE) -H. -DCMAKE_DEBUG_BUILD=ON -DCMAKE_INSTALL_PREFIX=$(shell pwd)/target/$(PROFILE)
+
+target/release/Makefile:
+	@mkdir -p target/$(PROFILE)
+	@cmake -Btarget/$(PROFILE) -H. -DCMAKE_DEBUG_BUILD=OFF -DCMAKE_INSTALL_PREFIX=$(shell pwd)/target/$(PROFILE)
+
+
+build-deps: target/$(PROFILE)/include/vulkan
+
+target/$(PROFILE)/include/vulkan: target/deps/Vulkan-Hpp
+	@mkdir -p target/$(PROFILE)/include
+	@cp -r target/deps/Vulkan-Hpp/vulkan target/$(PROFILE)/include/vulkan
+
+target/deps/Vulkan-Hpp:
 	@echo -e " $(c)Downloading$(r) Vulkan-Hpp"
-	@mkdir -p target/$(PROFILE)/deps/Vulkan-Hpp
-	@git clone https://github.com/KhronosGroup/Vulkan-Hpp target/$(PROFILE)/deps/Vulkan-Hpp
-	@cd target/$(PROFILE)/deps/Vulkan-Hpp && git checkout 141e8ce93b47bbbf7e8217a897a427a56a2d32b1
+	@mkdir -p target/deps/Vulkan-Hpp
+	@git clone https://github.com/KhronosGroup/Vulkan-Hpp target/deps/Vulkan-Hpp
+	@cd target/deps/Vulkan-Hpp && git checkout 141e8ce93b47bbbf7e8217a897a427a56a2d32b1
 
 .PHONY: clean
 clean:
