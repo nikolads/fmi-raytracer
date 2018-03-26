@@ -93,7 +93,7 @@ vk::UniqueDescriptorSetLayout createDescriptorSetLayoyt(vk::Device device) {
     return device.createDescriptorSetLayoutUnique(layoutInfo, nullptr);
 }
 
-std::tuple<vk::UniqueDescriptorPool, vk::UniqueDescriptorSet> createDescriptorSet(
+std::tuple<vk::UniqueDescriptorPool, vk::DescriptorSet> createDescriptorSet(
     vk::Device device, vk::DescriptorSetLayout layout, vk::Buffer buffer)
 {
     const auto poolSize = vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1);
@@ -112,12 +112,12 @@ std::tuple<vk::UniqueDescriptorPool, vk::UniqueDescriptorSet> createDescriptorSe
         &layout                                 // pSetLayouts
     );
 
-    auto sets = device.allocateDescriptorSetsUnique(allocInfo);
+    auto sets = device.allocateDescriptorSets(allocInfo);
     auto set = std::move(sets[0]);
 
     const auto bufferInfo = vk::DescriptorBufferInfo(buffer, 0, VK_WHOLE_SIZE);
     const auto writeInfo = vk::WriteDescriptorSet(
-        *set,                                   // dstSet
+        set,                                    // dstSet
         0,                                      // dstBinding
         0,                                      // dstArrayElement
         1,                                      // descriptorCount
@@ -175,8 +175,9 @@ std::tuple<vk::UniquePipeline, vk::UniquePipelineLayout, vk::UniqueShaderModule>
     return std::make_tuple(std::move(pipeline), std::move(layout), std::move(shader));
 }
 
-std::tuple<vk::UniqueCommandPool, vk::UniqueCommandBuffer> createCommands(vk::Device device,
-    const Queues& queues, vk::Pipeline pipeline, vk::PipelineLayout pipelineLayout, vk::DescriptorSet descriptorSet)
+std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCommands(
+    vk::Device device, vk::SwapchainKHR swapchain, const Queues& queues, vk::Pipeline pipeline,
+    vk::PipelineLayout pipelineLayout, vk::DescriptorSet descriptorSet)
 {
     auto poolInfo = vk::CommandPoolCreateInfo(
         vk::CommandPoolCreateFlags(),           // flags
@@ -185,42 +186,102 @@ std::tuple<vk::UniqueCommandPool, vk::UniqueCommandBuffer> createCommands(vk::De
 
     auto pool = device.createCommandPoolUnique(poolInfo, nullptr);
 
-    // TODO: from the tutorial
-    // One of the drawing commands involves binding the right `VkFramebuffer`, so we'll have to record
-    // a command buffer for every image in the swap chain.
+    auto images = device.getSwapchainImagesKHR(swapchain);
 
     auto allocInfo = vk::CommandBufferAllocateInfo(
         *pool,                                  // commandPool,
         vk::CommandBufferLevel::ePrimary,       // level
-        1                                       // commandBufferCount
+        images.size()                           // commandBufferCount
     );
 
     auto buffers = device.allocateCommandBuffersUnique(allocInfo);
-    auto buffer = std::move(buffers[0]);
 
-    auto beginInfo = vk::CommandBufferBeginInfo(
-        vk::CommandBufferUsageFlagBits::eSimultaneousUse,   // flags
-        nullptr                                             // pInheritanceInfo
-    );
+    for (size_t i = 0; i < buffers.size(); i++) {
+        auto& buffer = buffers[i];
+        auto& image = images[i];
 
-    buffer->begin(beginInfo);
+        auto beginInfo = vk::CommandBufferBeginInfo(
+            vk::CommandBufferUsageFlagBits::eSimultaneousUse,   // flags
+            nullptr                                             // pInheritanceInfo
+        );
 
-    buffer->bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
-    buffer->bindDescriptorSets(
-        vk::PipelineBindPoint::eCompute,        // pipelineBindPoint,
-        pipelineLayout,                         // layout
-        0,                                      // firstSet
-        1,                                      // descriptorSetCount
-        &descriptorSet,                         // pDescriptorSets
-        0,                                      // dynamicOffsetCount
-        nullptr                                 // pDynamicOffsets
-    );
+        buffer->begin(beginInfo);
 
-    buffer->dispatch(1, 1, 1);
+        buffer->bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
+        buffer->bindDescriptorSets(
+            vk::PipelineBindPoint::eCompute,        // pipelineBindPoint,
+            pipelineLayout,                         // layout
+            0,                                      // firstSet
+            1,                                      // descriptorSetCount
+            &descriptorSet,                         // pDescriptorSets
+            0,                                      // dynamicOffsetCount
+            nullptr                                 // pDynamicOffsets
+        );
 
-    buffer->end();
+        const auto undefinedToTransfer = vk::ImageMemoryBarrier(
+            vk::AccessFlags(),                      // srcAccessMask
+            vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
+            vk::ImageLayout::eUndefined,            // oldLayout
+            vk::ImageLayout::eTransferDstOptimal,   // newLayout
+            queues.computeQueueFamily,              // srcQueueFamilyIndex
+            queues.computeQueueFamily,              // dstQueueFamilyIndex
+            image,                                  // image
+            vk::ImageSubresourceRange(              // subresourceRange
+                vk::ImageAspectFlagBits::eColor,        // aspectMask
+                0,                                      // baseMipLevel
+                1,                                      // levelCount
+                0,                                      // baseArrayLayer
+                1                                       // layerCount
+            )
+        );
 
-    return std::make_tuple(std::move(pool), std::move(buffer));
+        buffer->pipelineBarrier(
+            vk::PipelineStageFlagBits::eTopOfPipe,      // srcStageMask
+            vk::PipelineStageFlagBits::eComputeShader,  // dstStageMask
+            vk::DependencyFlags(),                      // dependencyFlags
+            0,                                          // memoryBarrierCount
+            nullptr,                                    // pMemoryBarriers
+            0,                                          // bufferMemoryBarrierCount
+            nullptr,                                    // pBufferMemoryBarriers
+            1,                                          // imageMemoryBarrierCount
+            &undefinedToTransfer                        // pImageMemoryBarriers
+        );
+
+        // buffer->dispatch(1, 1, 1);
+
+        const auto transferToPresent = vk::ImageMemoryBarrier(
+            vk::AccessFlagBits::eShaderRead,        // srcAccessMask
+            vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
+            vk::ImageLayout::eTransferDstOptimal,   // oldLayout
+            vk::ImageLayout::ePresentSrcKHR,        // newLayout
+            queues.computeQueueFamily,              // srcQueueFamilyIndex
+            queues.computeQueueFamily,              // dstQueueFamilyIndex
+            image,                                  // image
+            vk::ImageSubresourceRange(              // subresourceRange
+                vk::ImageAspectFlagBits::eColor,        // aspectMask
+                0,                                      // baseMipLevel
+                1,                                      // levelCount
+                0,                                      // baseArrayLayer
+                1                                       // layerCount
+            )
+        );
+
+        buffer->pipelineBarrier(
+            vk::PipelineStageFlagBits::eComputeShader,  // srcStageMask
+            vk::PipelineStageFlagBits::eBottomOfPipe,   // dstStageMask
+            vk::DependencyFlags(),                      // dependencyFlags
+            0,                                          // memoryBarrierCount
+            nullptr,                                    // pMemoryBarriers
+            0,                                          // bufferMemoryBarrierCount
+            nullptr,                                    // pBufferMemoryBarriers
+            1,                                          // imageMemoryBarrierCount
+            &transferToPresent                          // pImageMemoryBarriers
+        );
+
+        buffer->end();
+    }
+
+    return std::make_tuple(std::move(pool), std::move(buffers));
 }
 
 }

@@ -10,9 +10,9 @@ App::App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSur
     vk::UniqueDevice&& device, Queues queues, vk::UniqueSwapchainKHR&& swapchain,
     vk::UniqueDescriptorSetLayout&& descriptorLayout, vk::UniqueBuffer&& buffer,
     vk::UniqueDeviceMemory&& memory, vk::UniqueDescriptorPool&& descriptorPool,
-    vk::UniqueDescriptorSet&& descriptorSet, vk::UniquePipeline&& pipeline,
-    vk::UniquePipelineLayout&& pipelineLayout,vk::UniqueCommandPool&& cmdPool,
-    vk::UniqueCommandBuffer&& cmdBuffer, vk::UniqueSemaphore&& imageAvailableSemaphore):
+    vk::UniquePipeline&& pipeline, vk::UniquePipelineLayout&& pipelineLayout,
+    vk::UniqueCommandPool&& cmdPool, std::vector<vk::UniqueCommandBuffer>&& cmdBuffers,
+    vk::UniqueSemaphore&& imageAvailableSemaphore):
     window(std::move(window)),
     instance(std::move(instance)),
     surface(std::move(surface)),
@@ -23,11 +23,10 @@ App::App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSur
     buffer(std::move(buffer)),
     memory(std::move(memory)),
     descriptorPool(std::move(descriptorPool)),
-    descriptorSet(std::move(descriptorSet)),
     pipeline(std::move(pipeline)),
     pipelineLayout(std::move(pipelineLayout)),
     cmdPool(std::move(cmdPool)),
-    cmdBuffer(std::move(cmdBuffer)),
+    cmdBuffers(std::move(cmdBuffers)),
     imageAvailableSemaphore(std::move(imageAvailableSemaphore))
 {
 }
@@ -47,13 +46,13 @@ App App::create() {
     auto [buffer, memory] = createBuffer(*device, physical, height, width);
     auto [descriptorPool, descriptorSet] = createDescriptorSet(*device, *descriptorLayout, *buffer);
     auto [pipeline, pipelineLayout, shader] = createPipeline(*device, *descriptorLayout);
-    auto [cmdPool, cmdBuffer] = createCommands(*device, queues, *pipeline, *pipelineLayout, *descriptorSet);
+    auto [cmdPool, cmdBuffers] = createCommands(*device, *swapchain, queues, *pipeline, *pipelineLayout, descriptorSet);
     auto imageAvailableSemaphore = device->createSemaphoreUnique(vk::SemaphoreCreateInfo(), nullptr);
 
     return App(std::move(window), std::move(instance), std::move(surface),
         std::move(device), queues, std::move(swapchain), std::move(descriptorLayout),
-        std::move(buffer), std::move(memory), std::move(descriptorPool), std::move(descriptorSet),
-        std::move(pipeline), std::move(pipelineLayout), std::move(cmdPool), std::move(cmdBuffer),
+        std::move(buffer), std::move(memory), std::move(descriptorPool), std::move(pipeline),
+        std::move(pipelineLayout), std::move(cmdPool), std::move(cmdBuffers),
         std::move(imageAvailableSemaphore));
 }
 
@@ -83,7 +82,7 @@ void App::drawFrame() {
         &*this->imageAvailableSemaphore,    // pWaitSemaphores
         &waitStage,                         // pWaitDstStageMask
         1,                                  // commandBufferCount
-        &*this->cmdBuffer,                  // pCommandBuffers
+        &*this->cmdBuffers[imageIndex],     // pCommandBuffers
         0,                                  // signalSemaphoreCount
         nullptr                             // pSignalSemaphores
     );

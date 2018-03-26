@@ -4,6 +4,8 @@
 #include "device.h"
 #include "window.h"
 
+#include <vector>
+
 namespace app {
 
 class App {
@@ -18,11 +20,10 @@ private:
     vk::UniqueBuffer buffer;
     vk::UniqueDeviceMemory memory;
     vk::UniqueDescriptorPool descriptorPool;
-    vk::UniqueDescriptorSet descriptorSet;
     vk::UniquePipeline pipeline;
     vk::UniquePipelineLayout pipelineLayout;
     vk::UniqueCommandPool cmdPool;
-    vk::UniqueCommandBuffer cmdBuffer;
+    std::vector<vk::UniqueCommandBuffer> cmdBuffers;
     vk::UniqueSemaphore imageAvailableSemaphore;
 
 public:
@@ -42,9 +43,9 @@ private:
         vk::UniqueDevice&& device, Queues queues, vk::UniqueSwapchainKHR&& swapchain,
         vk::UniqueDescriptorSetLayout&& descriptorLayout, vk::UniqueBuffer&& buffer,
         vk::UniqueDeviceMemory&& memory, vk::UniqueDescriptorPool&& descriptorPool,
-        vk::UniqueDescriptorSet&& descriptorSet, vk::UniquePipeline&& pipeline,
-        vk::UniquePipelineLayout&& pipelineLayout,vk::UniqueCommandPool&& cmdPool,
-        vk::UniqueCommandBuffer&& cmdBuffer, vk::UniqueSemaphore&& imageAvailableSemaphore);
+        vk::UniquePipeline&& pipeline, vk::UniquePipelineLayout&& pipelineLayout,
+        vk::UniqueCommandPool&& cmdPool, std::vector<vk::UniqueCommandBuffer>&& cmdBuffers,
+        vk::UniqueSemaphore&& imageAvailableSemaphore);
 };
 
 } // namespace app

@@ -10,13 +10,14 @@ std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffer(vk::Device dev
 
 vk::UniqueDescriptorSetLayout createDescriptorSetLayoyt(vk::Device device);
 
-std::tuple<vk::UniqueDescriptorPool, vk::UniqueDescriptorSet> createDescriptorSet(
+std::tuple<vk::UniqueDescriptorPool, vk::DescriptorSet> createDescriptorSet(
     vk::Device device, vk::DescriptorSetLayout layout, vk::Buffer buffer);
 
 std::tuple<vk::UniquePipeline, vk::UniquePipelineLayout, vk::UniqueShaderModule> createPipeline(
     vk::Device device, vk::DescriptorSetLayout descriptorLayout);
 
-std::tuple<vk::UniqueCommandPool, vk::UniqueCommandBuffer> createCommands(vk::Device device,
-    const Queues& queues, vk::Pipeline pipeline, vk::PipelineLayout pipelineLayout, vk::DescriptorSet descriptorSet);
+std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCommands(
+    vk::Device device, vk::SwapchainKHR swapchain, const Queues& queues, vk::Pipeline pipeline,
+    vk::PipelineLayout pipelineLayout, vk::DescriptorSet descriptorSet);
 
 }
