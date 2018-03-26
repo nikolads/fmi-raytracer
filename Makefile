@@ -22,6 +22,7 @@ build: download-deps
 		src/app/app.cpp								\
 		src/app/device.cpp   						\
 		src/app/instance.cpp						\
+		src/app/shader.cpp   						\
 		src/app/window.cpp   						\
 		src/main.cpp								\
 

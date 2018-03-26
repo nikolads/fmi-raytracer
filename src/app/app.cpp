@@ -1,6 +1,7 @@
 #include "app.h"
 #include "device.h"
 #include "instance.h"
+#include "shader.h"
 #include "window.h"
 
 namespace app {
@@ -27,6 +28,8 @@ App App::create() {
     auto [device, queues] = createDevice(physical, *surface);
     auto [swapchain, format, extent] = createSwapchain(physical, *device, *surface, queues, width, height);
     auto imageViews = createImageViews(*device, *swapchain, format);
+    auto [pipeline, shader] = createPipeline(*device);
+    auto [cmdPool, cmdBuffer] = createCommands(*device, queues, *pipeline);
 
     return App(std::move(window), std::move(instance), std::move(surface),
         std::move(device), queues, std::move(swapchain));

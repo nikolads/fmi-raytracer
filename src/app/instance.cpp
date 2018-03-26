@@ -13,7 +13,7 @@ vk::UniqueInstance createInstance() {
         const auto validationLayers = make_array<char*>();
     #else
         const auto validationLayers = make_array(
-            // "VK_LAYER_LUNARG_api_dump",
+            "VK_LAYER_LUNARG_api_dump",
             "VK_LAYER_LUNARG_standard_validation"
         );
     #endif
