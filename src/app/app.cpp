@@ -7,13 +7,28 @@
 namespace app {
 
 App::App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSurfaceKHR&& surface,
-    vk::UniqueDevice&& device, Queues queues, vk::UniqueSwapchainKHR&& swapchain):
+    vk::UniqueDevice&& device, Queues queues, vk::UniqueSwapchainKHR&& swapchain,
+    vk::UniqueDescriptorSetLayout&& descriptorLayout, vk::UniqueBuffer&& buffer,
+    vk::UniqueDeviceMemory&& memory, vk::UniqueDescriptorPool&& descriptorPool,
+    vk::UniqueDescriptorSet&& descriptorSet, vk::UniquePipeline&& pipeline,
+    vk::UniquePipelineLayout&& pipelineLayout,vk::UniqueCommandPool&& cmdPool,
+    vk::UniqueCommandBuffer&& cmdBuffer, vk::UniqueSemaphore&& imageAvailableSemaphore):
     window(std::move(window)),
     instance(std::move(instance)),
     surface(std::move(surface)),
     device(std::move(device)),
     queues(queues),
-    swapchain(std::move(swapchain))
+    swapchain(std::move(swapchain)),
+    descriptorLayout(std::move(descriptorLayout)),
+    buffer(std::move(buffer)),
+    memory(std::move(memory)),
+    descriptorPool(std::move(descriptorPool)),
+    descriptorSet(std::move(descriptorSet)),
+    pipeline(std::move(pipeline)),
+    pipelineLayout(std::move(pipelineLayout)),
+    cmdPool(std::move(cmdPool)),
+    cmdBuffer(std::move(cmdBuffer)),
+    imageAvailableSemaphore(std::move(imageAvailableSemaphore))
 {
 }
 
@@ -28,11 +43,18 @@ App App::create() {
     auto [device, queues] = createDevice(physical, *surface);
     auto [swapchain, format, extent] = createSwapchain(physical, *device, *surface, queues, width, height);
     auto imageViews = createImageViews(*device, *swapchain, format);
-    auto [pipeline, shader] = createPipeline(*device);
-    auto [cmdPool, cmdBuffer] = createCommands(*device, queues, *pipeline);
+    auto descriptorLayout = createDescriptorSetLayoyt(*device);
+    auto [buffer, memory] = createBuffer(*device, physical, height, width);
+    auto [descriptorPool, descriptorSet] = createDescriptorSet(*device, *descriptorLayout, *buffer);
+    auto [pipeline, pipelineLayout, shader] = createPipeline(*device, *descriptorLayout);
+    auto [cmdPool, cmdBuffer] = createCommands(*device, queues, *pipeline, *pipelineLayout, *descriptorSet);
+    auto imageAvailableSemaphore = device->createSemaphoreUnique(vk::SemaphoreCreateInfo(), nullptr);
 
     return App(std::move(window), std::move(instance), std::move(surface),
-        std::move(device), queues, std::move(swapchain));
+        std::move(device), queues, std::move(swapchain), std::move(descriptorLayout),
+        std::move(buffer), std::move(memory), std::move(descriptorPool), std::move(descriptorSet),
+        std::move(pipeline), std::move(pipelineLayout), std::move(cmdPool), std::move(cmdBuffer),
+        std::move(imageAvailableSemaphore));
 }
 
 void App::mainLoop() {
@@ -41,7 +63,7 @@ void App::mainLoop() {
     while (running) {
         glfwPollEvents();
 
-        // this->drawFrame();
+        this->drawFrame();
 
         running &= !glfwWindowShouldClose(&*this->window);
         running &= !glfwGetKey(&*this->window, GLFW_KEY_ESCAPE);
@@ -51,11 +73,22 @@ void App::mainLoop() {
 }
 
 void App::drawFrame() {
-    // TODO: add semaphore or fence
     auto imageIndex = this->device->acquireNextImageKHR(*this->swapchain,
-        std::numeric_limits<uint64_t>::max(), nullptr, nullptr).value;
+        std::numeric_limits<uint64_t>::max(), *this->imageAvailableSemaphore, nullptr).value;
 
-    // TODO: submit
+    auto waitStage = vk::PipelineStageFlags(vk::PipelineStageFlagBits::eColorAttachmentOutput);
+
+    auto submitInfo = vk::SubmitInfo(
+        1,                                  // waitSemaphoreCount
+        &*this->imageAvailableSemaphore,    // pWaitSemaphores
+        &waitStage,                         // pWaitDstStageMask
+        1,                                  // commandBufferCount
+        &*this->cmdBuffer,                  // pCommandBuffers
+        0,                                  // signalSemaphoreCount
+        nullptr                             // pSignalSemaphores
+    );
+
+    this->queues.compute.submit(1, &submitInfo, nullptr);
 
     auto presentInfo = vk::PresentInfoKHR(
         0,                      // waitSemaphoreCount

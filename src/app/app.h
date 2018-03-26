@@ -14,6 +14,16 @@ private:
     vk::UniqueDevice device;
     Queues queues;
     vk::UniqueSwapchainKHR swapchain;
+    vk::UniqueDescriptorSetLayout descriptorLayout;
+    vk::UniqueBuffer buffer;
+    vk::UniqueDeviceMemory memory;
+    vk::UniqueDescriptorPool descriptorPool;
+    vk::UniqueDescriptorSet descriptorSet;
+    vk::UniquePipeline pipeline;
+    vk::UniquePipelineLayout pipelineLayout;
+    vk::UniqueCommandPool cmdPool;
+    vk::UniqueCommandBuffer cmdBuffer;
+    vk::UniqueSemaphore imageAvailableSemaphore;
 
 public:
     static App create();
@@ -26,9 +36,15 @@ public:
 
     void mainLoop();
     void drawFrame();
+
 private:
     App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSurfaceKHR&& surface,
-        vk::UniqueDevice&& device, Queues queues, vk::UniqueSwapchainKHR&& swapchain);
+        vk::UniqueDevice&& device, Queues queues, vk::UniqueSwapchainKHR&& swapchain,
+        vk::UniqueDescriptorSetLayout&& descriptorLayout, vk::UniqueBuffer&& buffer,
+        vk::UniqueDeviceMemory&& memory, vk::UniqueDescriptorPool&& descriptorPool,
+        vk::UniqueDescriptorSet&& descriptorSet, vk::UniquePipeline&& pipeline,
+        vk::UniquePipelineLayout&& pipelineLayout,vk::UniqueCommandPool&& cmdPool,
+        vk::UniqueCommandBuffer&& cmdBuffer, vk::UniqueSemaphore&& imageAvailableSemaphore);
 };
 
 } // namespace app

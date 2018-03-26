@@ -5,9 +5,18 @@
 
 namespace app {
 
-std::tuple<vk::UniquePipeline, vk::UniqueShaderModule> createPipeline(vk::Device device);
+std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffer(vk::Device device, vk::PhysicalDevice physical,
+    uint32_t height, uint32_t width);
+
+vk::UniqueDescriptorSetLayout createDescriptorSetLayoyt(vk::Device device);
+
+std::tuple<vk::UniqueDescriptorPool, vk::UniqueDescriptorSet> createDescriptorSet(
+    vk::Device device, vk::DescriptorSetLayout layout, vk::Buffer buffer);
+
+std::tuple<vk::UniquePipeline, vk::UniquePipelineLayout, vk::UniqueShaderModule> createPipeline(
+    vk::Device device, vk::DescriptorSetLayout descriptorLayout);
 
 std::tuple<vk::UniqueCommandPool, vk::UniqueCommandBuffer> createCommands(vk::Device device,
-    const Queues& queues, vk::Pipeline pipeline);
+    const Queues& queues, vk::Pipeline pipeline, vk::PipelineLayout pipelineLayout, vk::DescriptorSet descriptorSet);
 
 }
