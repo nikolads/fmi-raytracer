@@ -15,6 +15,8 @@ UniqueGlfwWindow createWindow(uint32_t width, uint32_t height, const char* title
         throw std::runtime_error("glfwCreateWindow failed");
     }
 
+    glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
+
     return UniqueGlfwWindow(window, [](GLFWwindow*){ glfwTerminate(); });
 }
 

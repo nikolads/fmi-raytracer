@@ -9,7 +9,7 @@ else
 flags := $(release_flags)
 endif
 
-build: build-deps cmake
+build: build-deps build-shaders cmake
 	@echo -e "    $(c)Building$(r) raytrace"
 	@make --dir=target/$(PROFILE)
 
@@ -27,6 +27,11 @@ target/release/Makefile:
 	@mkdir -p target/$(PROFILE)
 	@cmake -Btarget/$(PROFILE) -H. -DCMAKE_DEBUG_BUILD=OFF -DCMAKE_INSTALL_PREFIX=$(shell pwd)/target/$(PROFILE)
 
+
+build-shaders: shader/comp.spv
+
+shader/comp.spv: shader/main.comp
+	@glsllangValidator -V shader/main.comp -o shader/comp.spv
 
 build-deps: target/$(PROFILE)/include/vulkan
 

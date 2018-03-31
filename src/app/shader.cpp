@@ -1,8 +1,12 @@
 #include "shader.h"
 
+#include <array>
 #include <cassert>
+#include <experimental/array>
 #include <fstream>
 #include <vector>
+
+using std::experimental::make_array;
 
 namespace app {
 
@@ -49,36 +53,60 @@ uint32_t findMemoryType(vk::PhysicalDevice physical, uint32_t mask, vk::MemoryPr
     throw std::runtime_error("failed to find suitable memory type!");
 }
 
-std::tuple<vk::UniqueBuffer, vk::UniqueDeviceMemory> createBuffer(vk::Device device, vk::PhysicalDevice physical,
-    uint32_t height, uint32_t width)
+std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createImage(
+    vk::Device device, vk::PhysicalDevice physical, vk::Extent2D extent)
 {
-    const auto info = vk::BufferCreateInfo(
-        vk::BufferCreateFlags(),                                                            // flags
-        height * width * 4 * sizeof(float),                                                                      // size
-        vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer,    // usage
-        vk::SharingMode::eExclusive,                                                        // sharingMode
-        0,                                                                                  // queueFamilyIndexCount
-        nullptr                                                                             // pQueueFamilyIndices
+    const auto info = vk::ImageCreateInfo(
+        vk::ImageCreateFlags(),                                                     // flags
+        vk::ImageType::e2D,                                                         // imageType
+        vk::Format::eR8G8B8A8Srgb,                                                  // format
+        vk::Extent3D(extent.width, extent.height, 1),                               // extent
+        1,                                                                          // mipLevels
+        1,                                                                          // arrayLayers
+        vk::SampleCountFlagBits::e1,                                                // samples
+        vk::ImageTiling::eLinear,                                                   // tiling
+        vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage,    // usage
+        vk::SharingMode::eExclusive,                                                // sharingMode
+        0,                                                                          // queueFamilyIndexCount
+        nullptr,                                                                    // pQueueFamilyIndices
+        vk::ImageLayout::eUndefined                                                 // initialLayout
     );
 
-    auto buffer = device.createBufferUnique(info, nullptr);
+    auto image = device.createImageUnique(info, nullptr);
 
-    const auto requirements = device.getBufferMemoryRequirements(*buffer);
+    const auto requirements = device.getImageMemoryRequirements(*image);
     const auto allocInfo = vk::MemoryAllocateInfo(
-        requirements.size,                                                                  // allocationSize
-        findMemoryType(physical, requirements.memoryTypeBits, vk::MemoryPropertyFlags())    // memoryTypeIndex
+        requirements.size,
+        findMemoryType(physical, requirements.memoryTypeBits, vk::MemoryPropertyFlags())
     );
 
     auto memory = device.allocateMemoryUnique(allocInfo, nullptr);
-    device.bindBufferMemory(*buffer, *memory, 0);
+    device.bindImageMemory(*image, *memory, 0);
 
-    return std::make_tuple(std::move(buffer), std::move(memory));
+    const auto viewInfo = vk::ImageViewCreateInfo(
+        vk::ImageViewCreateFlags(),             // flags
+        *image,                                 // image
+        vk::ImageViewType::e2D,                 // viewType
+        vk::Format::eR8G8B8A8Srgb,              // format
+        vk::ComponentMapping(),                 // components
+        vk::ImageSubresourceRange(              // subresourceRange
+            vk::ImageAspectFlagBits::eColor,        // aspectMask
+            0,                                      // baseMipLevel
+            1,                                      // levelCount
+            0,                                      // baseArrayLayer
+            1                                       // layerCount
+        )
+    );
+
+    auto view = device.createImageViewUnique(viewInfo, nullptr);
+
+    return std::make_tuple(std::move(memory), std::move(image), std::move(view));
 }
 
 vk::UniqueDescriptorSetLayout createDescriptorSetLayoyt(vk::Device device) {
     const auto binding = vk::DescriptorSetLayoutBinding(
         0,                                      // binding
-        vk::DescriptorType::eStorageBuffer,     // descriptorType
+        vk::DescriptorType::eStorageImage,      // descriptorType
         1,                                      // descriptorCount
         vk::ShaderStageFlagBits::eCompute,      // stageFlags
         nullptr                                 // pImmutableSamplers
@@ -94,9 +122,9 @@ vk::UniqueDescriptorSetLayout createDescriptorSetLayoyt(vk::Device device) {
 }
 
 std::tuple<vk::UniqueDescriptorPool, vk::DescriptorSet> createDescriptorSet(
-    vk::Device device, vk::DescriptorSetLayout layout, vk::Buffer buffer)
+    vk::Device device, vk::DescriptorSetLayout layout, vk::ImageView workImageView)
 {
-    const auto poolSize = vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1);
+    const auto poolSize = vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 1);
     const auto poolInfo = vk::DescriptorPoolCreateInfo(
         vk::DescriptorPoolCreateFlags(),        // flags
         1,                                      // maxSets
@@ -115,15 +143,15 @@ std::tuple<vk::UniqueDescriptorPool, vk::DescriptorSet> createDescriptorSet(
     auto sets = device.allocateDescriptorSets(allocInfo);
     auto set = std::move(sets[0]);
 
-    const auto bufferInfo = vk::DescriptorBufferInfo(buffer, 0, VK_WHOLE_SIZE);
+    const auto imageInfo = vk::DescriptorImageInfo(nullptr, workImageView, vk::ImageLayout::eGeneral);
     const auto writeInfo = vk::WriteDescriptorSet(
         set,                                    // dstSet
         0,                                      // dstBinding
         0,                                      // dstArrayElement
         1,                                      // descriptorCount
-        vk::DescriptorType::eStorageBuffer,     // descriptorType
-        nullptr,                                // pImageInfo
-        &bufferInfo,                            // pBufferInfo
+        vk::DescriptorType::eStorageImage,      // descriptorType
+        &imageInfo,                             // pImageInfo
+        nullptr,                                // pBufferInfo
         nullptr                                 // pTexelBufferView
     );
 
@@ -177,7 +205,8 @@ std::tuple<vk::UniquePipeline, vk::UniquePipelineLayout, vk::UniqueShaderModule>
 
 std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCommands(
     vk::Device device, vk::SwapchainKHR swapchain, const Queues& queues, vk::Pipeline pipeline,
-    vk::PipelineLayout pipelineLayout, vk::DescriptorSet descriptorSet)
+    vk::PipelineLayout pipelineLayout, vk::DescriptorSet descriptorSet, vk::Image workImage,
+    vk::Extent2D extent)
 {
     auto poolInfo = vk::CommandPoolCreateInfo(
         vk::CommandPoolCreateFlags(),           // flags
@@ -218,20 +247,38 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
             nullptr                                 // pDynamicOffsets
         );
 
-        const auto undefinedToTransfer = vk::ImageMemoryBarrier(
-            vk::AccessFlags(),                      // srcAccessMask
-            vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
-            vk::ImageLayout::eUndefined,            // oldLayout
-            vk::ImageLayout::eTransferDstOptimal,   // newLayout
-            queues.computeQueueFamily,              // srcQueueFamilyIndex
-            queues.computeQueueFamily,              // dstQueueFamilyIndex
-            image,                                  // image
-            vk::ImageSubresourceRange(              // subresourceRange
-                vk::ImageAspectFlagBits::eColor,        // aspectMask
-                0,                                      // baseMipLevel
-                1,                                      // levelCount
-                0,                                      // baseArrayLayer
-                1                                       // layerCount
+        const auto initialLayouts = make_array(
+            vk::ImageMemoryBarrier(
+                vk::AccessFlags(),                      // srcAccessMask
+                vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
+                vk::ImageLayout::eUndefined,            // oldLayout
+                vk::ImageLayout::eTransferDstOptimal,   // newLayout
+                queues.computeQueueFamily,              // srcQueueFamilyIndex
+                queues.computeQueueFamily,              // dstQueueFamilyIndex
+                image,                                  // image
+                vk::ImageSubresourceRange(              // subresourceRange
+                    vk::ImageAspectFlagBits::eColor,        // aspectMask
+                    0,                                      // baseMipLevel
+                    1,                                      // levelCount
+                    0,                                      // baseArrayLayer
+                    1                                       // layerCount
+                )
+            ),
+            vk::ImageMemoryBarrier(
+                vk::AccessFlags(),                      // srcAccessMask
+                vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
+                vk::ImageLayout::eUndefined,            // oldLayout
+                vk::ImageLayout::eGeneral,              // newLayout
+                queues.computeQueueFamily,              // srcQueueFamilyIndex
+                queues.computeQueueFamily,              // dstQueueFamilyIndex
+                workImage,                              // image
+                vk::ImageSubresourceRange(              // subresourceRange
+                    vk::ImageAspectFlagBits::eColor,        // aspectMask
+                    0,                                      // baseMipLevel
+                    1,                                      // levelCount
+                    0,                                      // baseArrayLayer
+                    1                                       // layerCount
+                )
             )
         );
 
@@ -243,26 +290,85 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
             nullptr,                                    // pMemoryBarriers
             0,                                          // bufferMemoryBarrierCount
             nullptr,                                    // pBufferMemoryBarriers
-            1,                                          // imageMemoryBarrierCount
-            &undefinedToTransfer                        // pImageMemoryBarriers
+            initialLayouts.size(),                      // imageMemoryBarrierCount
+            initialLayouts.data()                       // pImageMemoryBarriers
         );
 
-        // buffer->dispatch(1, 1, 1);
+        const size_t WORKGROUP_SIZE = 32;
+        auto workgroupsX = (extent.width / WORKGROUP_SIZE) + (extent.width % WORKGROUP_SIZE != 0);
+        auto workgroupsY = (extent.height / WORKGROUP_SIZE) + (extent.height % WORKGROUP_SIZE != 0);
+        buffer->dispatch(workgroupsX, workgroupsY, 1);
 
-        const auto transferToPresent = vk::ImageMemoryBarrier(
-            vk::AccessFlagBits::eShaderRead,        // srcAccessMask
+        const auto generalToTransfer = vk::ImageMemoryBarrier(
+            vk::AccessFlags(),                      // srcAccessMask
             vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
-            vk::ImageLayout::eTransferDstOptimal,   // oldLayout
-            vk::ImageLayout::ePresentSrcKHR,        // newLayout
+            vk::ImageLayout::eGeneral,              // oldLayout
+            vk::ImageLayout::eTransferSrcOptimal,   // newLayout
             queues.computeQueueFamily,              // srcQueueFamilyIndex
             queues.computeQueueFamily,              // dstQueueFamilyIndex
-            image,                                  // image
+            workImage,                              // image
             vk::ImageSubresourceRange(              // subresourceRange
                 vk::ImageAspectFlagBits::eColor,        // aspectMask
                 0,                                      // baseMipLevel
                 1,                                      // levelCount
                 0,                                      // baseArrayLayer
                 1                                       // layerCount
+            )
+        );
+
+        buffer->pipelineBarrier(
+            vk::PipelineStageFlagBits::eComputeShader,  // srcStageMask
+            vk::PipelineStageFlagBits::eBottomOfPipe,   // dstStageMask
+            vk::DependencyFlags(),                      // dependencyFlags
+            0,                                          // memoryBarrierCount
+            nullptr,                                    // pMemoryBarriers
+            0,                                          // bufferMemoryBarrierCount
+            nullptr,                                    // pBufferMemoryBarriers
+            1,                                          // imageMemoryBarrierCount
+            &generalToTransfer                          // pImageMemoryBarriers
+        );
+
+        const auto copyInfo = vk::ImageCopy(
+            vk::ImageSubresourceLayers(                     // srcSubresource
+                vk::ImageAspectFlagBits::eColor,                // aspectMask
+                0,                                              // mipLevel
+                0,                                              // baseArrayLayer
+                1                                               // layerCount
+            ),
+            vk::Offset3D(0, 0, 0),                          // srcOffset
+            vk::ImageSubresourceLayers(                     // dstSubresource
+                vk::ImageAspectFlagBits::eColor,                // aspectMask
+                0,                                              // mipLevel
+                0,                                              // baseArrayLayer
+                1                                               // layerCount
+            ),
+            vk::Offset3D(0, 0, 0),                          // dstOffset
+            vk::Extent3D(extent.width, extent.height, 1)    // extent
+        );
+
+        buffer->copyImage(
+            workImage,                              // srcImage
+            vk::ImageLayout::eTransferSrcOptimal,   // srcImageLayout
+            image,                                  // dstImage
+            vk::ImageLayout::eTransferDstOptimal,   // dstImageLayout
+            1,                                      // regionCount
+            &copyInfo                               // pRegions
+        );
+
+        const auto transferToPresent = vk::ImageMemoryBarrier(
+            vk::AccessFlagBits::eShaderRead,            // srcAccessMask
+            vk::AccessFlagBits::eMemoryWrite,           // dstAccessMask
+            vk::ImageLayout::eTransferDstOptimal,       // oldLayout
+            vk::ImageLayout::ePresentSrcKHR,            // newLayout
+            queues.computeQueueFamily,                  // srcQueueFamilyIndex
+            queues.computeQueueFamily,                  // dstQueueFamilyIndex
+            image,                                      // image
+            vk::ImageSubresourceRange(                  // subresourceRange
+                vk::ImageAspectFlagBits::eColor,            // aspectMask
+                0,                                          // baseMipLevel
+                1,                                          // levelCount
+                0,                                          // baseArrayLayer
+                1                                           // layerCount
             )
         );
 

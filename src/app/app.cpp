@@ -8,8 +8,8 @@ namespace app {
 
 App::App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSurfaceKHR&& surface,
     vk::UniqueDevice&& device, Queues queues, vk::UniqueSwapchainKHR&& swapchain,
-    vk::UniqueDescriptorSetLayout&& descriptorLayout, vk::UniqueBuffer&& buffer,
-    vk::UniqueDeviceMemory&& memory, vk::UniqueDescriptorPool&& descriptorPool,
+    vk::UniqueDescriptorSetLayout&& descriptorLayout, vk::UniqueDeviceMemory&& memory,
+    vk::UniqueImage&& workImage, vk::UniqueImageView&& workImageView, vk::UniqueDescriptorPool&& descriptorPool,
     vk::UniquePipeline&& pipeline, vk::UniquePipelineLayout&& pipelineLayout,
     vk::UniqueCommandPool&& cmdPool, std::vector<vk::UniqueCommandBuffer>&& cmdBuffers,
     vk::UniqueSemaphore&& imageAvailableSemaphore):
@@ -20,8 +20,9 @@ App::App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSur
     queues(queues),
     swapchain(std::move(swapchain)),
     descriptorLayout(std::move(descriptorLayout)),
-    buffer(std::move(buffer)),
     memory(std::move(memory)),
+    workImage(std::move(workImage)),
+    workImageView(std::move(workImageView)),
     descriptorPool(std::move(descriptorPool)),
     pipeline(std::move(pipeline)),
     pipelineLayout(std::move(pipelineLayout)),
@@ -43,16 +44,17 @@ App App::create() {
     auto [swapchain, format, extent] = createSwapchain(physical, *device, *surface, queues, width, height);
     auto imageViews = createImageViews(*device, *swapchain, format);
     auto descriptorLayout = createDescriptorSetLayoyt(*device);
-    auto [buffer, memory] = createBuffer(*device, physical, height, width);
-    auto [descriptorPool, descriptorSet] = createDescriptorSet(*device, *descriptorLayout, *buffer);
+    auto [memory, workImage, workImageView] = createImage(*device, physical, extent);
+    auto [descriptorPool, descriptorSet] = createDescriptorSet(*device, *descriptorLayout, *workImageView);
     auto [pipeline, pipelineLayout, shader] = createPipeline(*device, *descriptorLayout);
-    auto [cmdPool, cmdBuffers] = createCommands(*device, *swapchain, queues, *pipeline, *pipelineLayout, descriptorSet);
+    auto [cmdPool, cmdBuffers] = createCommands(*device, *swapchain, queues, *pipeline, *pipelineLayout,
+        descriptorSet, *workImage, extent);
     auto imageAvailableSemaphore = device->createSemaphoreUnique(vk::SemaphoreCreateInfo(), nullptr);
 
     return App(std::move(window), std::move(instance), std::move(surface),
         std::move(device), queues, std::move(swapchain), std::move(descriptorLayout),
-        std::move(buffer), std::move(memory), std::move(descriptorPool), std::move(pipeline),
-        std::move(pipelineLayout), std::move(cmdPool), std::move(cmdBuffers),
+        std::move(memory), std::move(workImage), std::move(workImageView), std::move(descriptorPool),
+        std::move(pipeline), std::move(pipelineLayout), std::move(cmdPool), std::move(cmdBuffers),
         std::move(imageAvailableSemaphore));
 }
 
