@@ -8,57 +8,100 @@ layout(local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_
 
 layout(binding = 0, rgba8) writeonly restrict uniform image2D work_image;
 
-const vec3 SPHERE_CENTER = vec3(-0.5, -0.5, 1.5);
-const float SPHERE_RADIUS = 0.3;
+struct Ray {
+    vec3 origin;
+    vec3 dir;
+};
+
+struct Object {
+    mat4 transform;
+};
+
+const Object SPHERES[2] = Object[2](
+    Object(mat4(
+        0.3, 0.0, 0.0, 0,
+        0.0, 0.3, 0.0, 0,
+        0.0, 0.0, 0.3, 0,
+        -0.5, -0.5, 1.5, 1
+    )),
+    Object(mat4(
+        0.8, 0.0, 0.0, 0,
+        0.0, 0.3, 0.0, 0,
+        0.0, 0.0, 0.3, 0,
+        0.0, -0.3, 5, 1
+    ))
+);
+
+bool sphere_intersect(mat4 transform, Ray ray, out vec3 intersection_point) {
+    mat4 inv_transform = inverse(transform);
+
+    vec3 norm_start = (inv_transform * vec4(ray.origin, 1.0)).xyz;
+    vec3 norm_dir = normalize((inv_transform * vec4(ray.dir, 0.0)).xyz);
+
+    // X^2 + X * 2 * dot(start, dir) + dot(start, start) - 1 = 0
+    float a = 1.0;
+    float b = 2 * dot(norm_start, norm_dir);
+    float c = dot(norm_start, norm_start) - 1;
+    float disc = b*b - 4*a*c;
+
+    if (disc < 0) { return false; }
+
+    float sqrt_disc = sqrt(disc);
+    float smaller = (-b - sqrt_disc) / (2 * a);
+    float larger = (-b + sqrt_disc) / (2 * a);
+
+    float dist = (smaller >= 0.0) ? smaller : larger;
+    if (dist < 0.0) { return false; }
+
+    intersection_point = (transform * vec4(norm_start + dist * norm_dir, 1.0)).xyz;
+    return true;
+}
+
+vec3 sphere_normal(mat4 transform, vec3 point) {
+    vec3 center = (transform * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    return normalize(point - center);
+}
+
 const vec3 SPHERE_COLOR = vec3(0.5, 0.0, 0.0);
 
-float length_sq(vec3 v) {
-    return dot(v, v);
+Ray screen_ray(ivec2 pixel) {
+    const float ASPECT_RATIO = float(HEIGHT) / float(WIDTH);
+
+    vec3 origin = vec3(
+        (-1.0 + float(pixel.x) / float(WIDTH) * 2.0),
+        (-1.0 + float(pixel.y) / float(HEIGHT) * 2.0) * ASPECT_RATIO,
+        0.0
+    );
+
+    vec3 dir = normalize(origin - vec3(0.0, 0.0, -10.0));
+
+    return Ray(origin, dir);
 }
 
 void main() {
     // In order to fit the work into workgroups, some unnecessary threads are launched.
     if (gl_GlobalInvocationID.x >= WIDTH || gl_GlobalInvocationID.y >= HEIGHT) { return; }
 
-    const float ASPECT_RATIO = float(HEIGHT) / float(WIDTH);
+    Ray ray = screen_ray(ivec2(gl_GlobalInvocationID.xy));
+    float dist = 1.0 / 0.0;     // +infinity
+    vec3 color = vec3(0.0, 0.0, 1.0);
 
-    vec3 origin = vec3(
-        (-1.0 + float(gl_GlobalInvocationID.x) / float(WIDTH) * 2.0),
-        (-1.0 + float(gl_GlobalInvocationID.y) / float(HEIGHT) * 2.0) * ASPECT_RATIO,
-        0.0
-    );
-    vec3 dir = origin - vec3(0.0, 0.0, -1.0);
-    vec3 color;
+    for (uint i = 0; i < SPHERES.length(); i++) {
+        Object object = SPHERES[i];
+        vec3 intersection_point;
 
-    // see lecture 5 for equation
-    vec3 h = origin - SPHERE_CENTER;
-    float a = 1.0;
-    float b = 2 * dot(dir, h);
-    float c = length_sq(h) - sqrt(SPHERE_RADIUS);
+        if (sphere_intersect(object.transform, ray, intersection_point)) {
+            float dist_to_intersection = distance(ray.origin, intersection_point);
 
-    float disc = b * b - 4 * a * c;
-    if (disc < 0.0) {
-        color = vec3(0.0, 0.0, 1.0);
-    } else {
-        float sqrt_disc = sqrt(disc);
-        float p1 = (-b + sqrt_disc) / (2 * a);
-        float p2 = (-b - sqrt_disc) / (2 * a);
+            if (dist_to_intersection < dist) {
+                vec3 intersection_dir = normalize(ray.origin - intersection_point);
+                vec3 normal = sphere_normal(object.transform, intersection_point);
 
-        float smaller = min(p1, p2);
-        float larger = max(p1, p2);
-
-        float dist = (smaller >= 0.0) ? smaller : larger;
-
-        if (dist < 0.0) {
-            color = vec3(0.0, 0.0, 0.0);
-        } else {
-            vec3 intersection_point = origin + dist * dir;
-            vec3 intersection_dir = normalize(origin - intersection_point);
-            vec3 sphere_normal = normalize(intersection_point - SPHERE_CENTER);
-
-            color = SPHERE_COLOR * dot(intersection_dir, sphere_normal);
+                dist = dist_to_intersection;
+                color = SPHERE_COLOR * dot(intersection_dir, normal);
+            }
         }
     }
 
-    imageStore(work_image, ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y), vec4(color.b, color.g, color.r, 1.0));
+    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(color.bgr, 1.0));
 }

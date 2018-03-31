@@ -64,7 +64,7 @@ std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createI
         1,                                                                          // mipLevels
         1,                                                                          // arrayLayers
         vk::SampleCountFlagBits::e1,                                                // samples
-        vk::ImageTiling::eLinear,                                                   // tiling
+        vk::ImageTiling::eOptimal,                                                  // tiling
         vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage,    // usage
         vk::SharingMode::eExclusive,                                                // sharingMode
         0,                                                                          // queueFamilyIndexCount
