@@ -9,39 +9,88 @@ layout(local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_
 layout(binding = 0, rgba8) writeonly restrict uniform image2D work_image;
 
 struct Ray {
-    vec3 origin;
+    vec3 start;
     vec3 dir;
 };
 
-struct Object {
-    mat4 transform;
+Ray screen_ray(uvec2 pixel) {
+    const float ASPECT_RATIO = float(HEIGHT) / float(WIDTH);
+
+    vec3 origin = vec3(
+        (-1.0 + float(pixel.x) / float(WIDTH) * 2.0),
+        (-1.0 + float(pixel.y) / float(HEIGHT) * 2.0) * ASPECT_RATIO,
+        0.0
+    );
+
+    // TODO: -Z should be calculated from FoV
+    vec3 dir = normalize(origin - vec3(0.0, 0.0, -10.0));
+
+    return Ray(origin, dir);
+}
+
+struct Material {
+    float refr_index;
+    float glossiness;
+    vec3 color;
 };
 
-const Object SPHERES[2] = Object[2](
-    Object(mat4(
-        0.3, 0.0, 0.0, 0,
-        0.0, 0.3, 0.0, 0,
-        0.0, 0.0, 0.3, 0,
-        -0.5, -0.5, 1.5, 1
-    )),
-    Object(mat4(
-        0.8, 0.0, 0.0, 0,
-        0.0, 0.3, 0.0, 0,
-        0.0, 0.0, 0.3, 0,
-        0.0, -0.3, 5, 1
-    ))
-);
+float brdf_eval(Material material, vec3 w_in, vec3 w_out, vec3 normal) {
+    if (dot(w_in, w_out) < 0) {
+        return 0.0;
+    } else {
+        // TODO: this is for glossiness 0, i.e. ideally matte surface
+        return dot(w_out, normal);
+    }
+}
 
-bool sphere_intersect(mat4 transform, Ray ray, out vec3 intersection_point) {
-    mat4 inv_transform = inverse(transform);
+///
+///
+/// Assumes `w_in` and `normal` are normalized vectors
+void brdf_spawn_ray(Material material, vec3 w_in, vec3 normal, float medium_refr_index, out vec3 w_out, out float prob) {
+    float n1 = medium_refr_index;
+    float n2 = material.refr_index;
 
-    vec3 norm_start = (inv_transform * vec4(ray.origin, 1.0)).xyz;
-    vec3 norm_dir = normalize((inv_transform * vec4(ray.dir, 0.0)).xyz);
+    // check if the ray reflects or refracts
+    // // using Schlick's approximation
+    // float r0 = (n1 - n2) / (n1 + n2) * (n1 - n2) / (n1 + n2);
+    // float cos_theta_in = dot(w_in, normal);
+    // float probablity_of_reflection = r0 + (1 - r0) * pow(1 - cos_theta_in, 5);
+
+    // using Fresnel's equations
+    float cos_theta_in = dot(w_in, normal);
+    float sin_theta_out_sq = (n1 / n2) * (n1 / n2) * (1 - cos_theta_in * cos_theta_in);
+    float cos_theta_out = sqrt(1 - sin_theta_out_sq);
+
+    float refl_s_polarized = (n1 * cos_theta_in - n2 * cos_theta_out) / (n2 * cos_theta_in + n1 * cos_theta_out);
+    float refl_p_polarized = (n2 * cos_theta_in - n1 * cos_theta_out) / (n1 * cos_theta_in + n2 * cos_theta_out);
+    float probablity_of_reflection = (refl_s_polarized * refl_s_polarized + refl_p_polarized * refl_p_polarized) * 0.5;
+
+    float roll = 1.0;   // TODO: add random
+    if (roll < probablity_of_reflection) {
+        // TODO: calculate reflected ray
+    } else {
+        // TODO: take `glossiness` into account?
+        w_out = (n1 / n2) * (-w_in) + (n1 / n2 * cos_theta_in - cos_theta_out) * normal;
+        prob = 1 - probablity_of_reflection;
+    }
+}
+
+struct Object {
+    mat4 transform;
+    mat4 inv_transform;
+    Material material;
+};
+
+bool sphere_intersect(Object sphere, Ray ray, out vec3 intersection_point) {
+    Ray norm_ray = Ray(
+        (sphere.inv_transform * vec4(ray.start, 1.0)).xyz,
+        normalize((sphere.inv_transform * vec4(ray.dir, 0.0)).xyz)
+    );
 
     // X^2 + X * 2 * dot(start, dir) + dot(start, start) - 1 = 0
     float a = 1.0;
-    float b = 2 * dot(norm_start, norm_dir);
-    float c = dot(norm_start, norm_start) - 1;
+    float b = 2 * dot(norm_ray.start, norm_ray.dir);
+    float c = dot(norm_ray.start, norm_ray.start) - 1;
     float disc = b*b - 4*a*c;
 
     if (disc < 0) { return false; }
@@ -53,55 +102,124 @@ bool sphere_intersect(mat4 transform, Ray ray, out vec3 intersection_point) {
     float dist = (smaller >= 0.0) ? smaller : larger;
     if (dist < 0.0) { return false; }
 
-    intersection_point = (transform * vec4(norm_start + dist * norm_dir, 1.0)).xyz;
+    vec3 norm_intersection = norm_ray.start + dist * norm_ray.dir;
+    intersection_point = (sphere.transform * vec4(norm_intersection, 1.0)).xyz;
     return true;
 }
 
-vec3 sphere_normal(mat4 transform, vec3 point) {
-    vec3 center = (transform * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+vec3 sphere_normal(Object sphere, vec3 point) {
+    vec3 center = (sphere.transform * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     return normalize(point - center);
 }
 
+struct PointLight {
+    vec3 pos;
+    vec3 color;
+};
+
+vec3 point_light_sample(PointLight light) {
+    return light.pos;
+}
+
+const Object SPHERES[2] = Object[2](
+    Object(
+        mat4(
+            0.3, 0.0, 0.0, 0,
+            0.0, 0.3, 0.0, 0,
+            0.0, 0.0, 0.3, 0,
+            -0.5, -0.5, 1.5, 1
+        ),
+        mat4(
+            3.33333, 0.0, 0.0, 0,
+            0.0, 3.33333, 0.0, 0,
+            0.0, 0.0, 3.33333, 0,
+            1.66667, 1.66667, -5, 1
+        ),
+        Material(1.0, 1.4, vec3(0.5, 0.1, 0.1))
+    ),
+    Object(
+        mat4(
+            0.8, 0.0, 0.0, 0,
+            0.0, 0.3, 0.0, 0,
+            0.0, 0.0, 0.3, 0,
+            0.0, -0.3, 5, 1
+        ),
+        mat4(
+            1.25, 0.0, 0.0, 0,
+            0.0, 3.33333, 0.0, 0,
+            0.0, 0.0, 3.33333, 0,
+            0.0, 1, -16.66667, 1
+        ),
+        Material(1.0, 10000, vec3(0.1, 0.4, 0.1))
+    )
+);
+
+const PointLight LIGHTS[1] = PointLight[1](
+    PointLight(vec3(-0.9, -0.9, 0.6), vec3(1, 1, 3))
+);
+
 const vec3 SPHERE_COLOR = vec3(0.5, 0.0, 0.0);
 
-Ray screen_ray(ivec2 pixel) {
-    const float ASPECT_RATIO = float(HEIGHT) / float(WIDTH);
+struct IntersectionInfo {
+    int object;
+    vec3 point;
+    float dist;
+};
 
-    vec3 origin = vec3(
-        (-1.0 + float(pixel.x) / float(WIDTH) * 2.0),
-        (-1.0 + float(pixel.y) / float(HEIGHT) * 2.0) * ASPECT_RATIO,
-        0.0
-    );
+IntersectionInfo trace_ray(Ray ray) {
+    IntersectionInfo info = IntersectionInfo(-1, vec3(0, 0, 0), 1.0 / 0.0);
 
-    vec3 dir = normalize(origin - vec3(0.0, 0.0, -10.0));
+    for (uint i = 0; i < SPHERES.length(); i++) {
+        Object object = SPHERES[i];
+        vec3 intersection_point;
 
-    return Ray(origin, dir);
+        if (sphere_intersect(object, ray, intersection_point)) {
+            float dist_to_intersection = distance(ray.start, intersection_point);
+
+            if (dist_to_intersection < info.dist) {
+                info = IntersectionInfo(int(i), intersection_point, dist_to_intersection);
+            }
+        }
+    }
+
+    return info;
 }
 
 void main() {
     // In order to fit the work into workgroups, some unnecessary threads are launched.
     if (gl_GlobalInvocationID.x >= WIDTH || gl_GlobalInvocationID.y >= HEIGHT) { return; }
 
-    Ray ray = screen_ray(ivec2(gl_GlobalInvocationID.xy));
-    float dist = 1.0 / 0.0;     // +infinity
-    vec3 color = vec3(0.0, 0.0, 1.0);
+    Ray ray = screen_ray(gl_GlobalInvocationID.xy);
+    vec3 out_color = vec3(0.0, 0.0, 0.0);
+    vec3 light_mult = vec3(1.0, 1.0, 1.0);
 
-    for (uint i = 0; i < SPHERES.length(); i++) {
-        Object object = SPHERES[i];
-        vec3 intersection_point;
+    IntersectionInfo intersect = trace_ray(ray);
 
-        if (sphere_intersect(object.transform, ray, intersection_point)) {
-            float dist_to_intersection = distance(ray.origin, intersection_point);
+    const uint MAX_DEPTH = 1;
 
-            if (dist_to_intersection < dist) {
-                vec3 intersection_dir = normalize(ray.origin - intersection_point);
-                vec3 normal = sphere_normal(object.transform, intersection_point);
+    if (intersect.object != -1) {
+        for (uint i = 0; i < MAX_DEPTH; i++) {
+            Object intersect_object = SPHERES[intersect.object];
+            vec3 light_sample = point_light_sample(LIGHTS[0]);
+            float dist_to_light = distance(light_sample, intersect.point);
 
-                dist = dist_to_intersection;
-                color = SPHERE_COLOR * dot(intersection_dir, normal);
+            Ray light_ray = Ray(intersect.point + 0.000061035 * sphere_normal(intersect_object, intersect.point), normalize(light_sample - intersect.point));
+            IntersectionInfo light_intersect = trace_ray(light_ray);
+
+            if (dist_to_light < light_intersect.dist) {
+                vec3 object_normal = sphere_normal(intersect_object, intersect.point);
+                float prob = brdf_eval(intersect_object.material, -ray.dir, light_ray.dir, object_normal);
+                out_color += LIGHTS[0].color * intersect_object.material.color * light_mult * prob;
             }
+
+            // TODO:
+            // normal_ray = brdf_spawn_ray();
         }
+
+        out_color /= MAX_DEPTH;
+    } else {
+        out_color = vec3(0.0, 0.0, 0.05);
     }
 
-    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(color.bgr, 1.0));
+    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(out_color.bgr, 1.0));
 }
