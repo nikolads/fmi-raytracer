@@ -8,6 +8,52 @@ layout(local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_
 
 layout(binding = 0, rgba8) writeonly restrict uniform image2D work_image;
 
+const float PI = 3.14159265358979323846264338327950288;
+
+uint RNG_STATE = 0;
+
+float sin_rand() {
+    vec2 co = vec2(float(gl_LocalInvocationIndex), float(RNG_STATE));
+    RNG_STATE += 1;
+
+    float dt = dot(co.xy, vec2(12.9898, 78.233));
+    float sn = mod(dt, PI);
+    return fract(sin(sn) * 43758.5453);
+}
+
+float sq(float x) {
+    return x * x;
+}
+
+/// Pick a random point in the unit disc with uniform probability.
+vec2 random_unit_disc_sample() {
+    // see http://mathworld.wolfram.com/DiskPointPicking.html
+    float angle = sin_rand() * 2.0 * PI;
+	float rad = sqrt(sin_rand());
+	return vec2(sin(angle) * rad, cos(angle) * rad);
+}
+
+/// Generates a random orthonormal basis based on an input vector.
+///
+/// Generates vectors `ray1` and `ray2` such that together with `in_ray` they
+/// form an orthonormal system in 3D (all vectors are unit, and are mutually orthogonal).
+///
+/// `in_ray` must be a unit vector.
+void orthonormal_system(vec3 in_ray, out vec3 ray1, out vec3 ray2) {
+	const vec3 FIXED_SAMPLES[2] = vec3[2](
+        vec3(-0.267261242, +0.534522484, -0.801783726),
+		vec3(+0.483368245, +0.096673649, +0.870062840)
+    );
+
+	if (abs(dot(in_ray, FIXED_SAMPLES[0])) < 0.99) {
+        ray1 = normalize(cross(in_ray, FIXED_SAMPLES[0]));
+        ray2 = normalize(cross(in_ray, ray1));
+    } else {
+        ray1 = normalize(cross(in_ray, FIXED_SAMPLES[1]));
+        ray2 = normalize(cross(in_ray, ray1));
+    }
+}
+
 struct Ray {
     vec3 start;
     vec3 dir;
@@ -38,8 +84,8 @@ float brdf_eval(Material material, vec3 w_in, vec3 w_out, vec3 normal) {
     if (dot(w_in, w_out) < 0) {
         return 0.0;
     } else {
-        // TODO: this is for glossiness 0, i.e. ideally matte surface
-        return dot(w_out, normal);
+        // TODO: this is probably not accurate
+        return pow(dot(w_out, normal), 1 / (1 - material.glossiness));
     }
 }
 
@@ -47,8 +93,25 @@ float brdf_eval(Material material, vec3 w_in, vec3 w_out, vec3 normal) {
 ///
 /// Assumes `w_in` and `normal` are normalized vectors
 void brdf_spawn_ray(Material material, vec3 w_in, vec3 normal, float medium_refr_index, out vec3 w_out, out float prob) {
-    float n1 = medium_refr_index;
-    float n2 = material.refr_index;
+    float n1, n2;
+
+    if (dot(w_in, normal) > 0.0) {
+        n1 = medium_refr_index;
+        n2 = material.refr_index;
+    } else {
+        n1 = material.refr_index;
+        n2 = medium_refr_index;
+        normal = -normal;
+    }
+
+    // vec3 e2, e3;
+    // orthonormal_system(normal, e2, e3);
+
+    // float scaling = tan(1 - material.glossiness * PI / 2);
+    // float scaling = 1 - material.glossiness;
+    // vec2 disc_sample = scaling * random_unit_disc_sample();
+    // vec3 modified_normal = normalize(normal + disc_sample.x * e2 + disc_sample.y * e3);
+    vec3 modified_normal = normal;
 
     // check if the ray reflects or refracts
     // // using Schlick's approximation
@@ -57,21 +120,24 @@ void brdf_spawn_ray(Material material, vec3 w_in, vec3 normal, float medium_refr
     // float probablity_of_reflection = r0 + (1 - r0) * pow(1 - cos_theta_in, 5);
 
     // using Fresnel's equations
-    float cos_theta_in = dot(w_in, normal);
-    float sin_theta_out_sq = (n1 / n2) * (n1 / n2) * (1 - cos_theta_in * cos_theta_in);
-    float cos_theta_out = sqrt(1 - sin_theta_out_sq);
+    float cos_in = dot(w_in, modified_normal);
+    float sin_out_sq = (n1 / n2) * (n1 / n2) * (1 - cos_in * cos_in);
+    float cos_out = sqrt(1 - sin_out_sq);
 
-    float refl_s_polarized = (n1 * cos_theta_in - n2 * cos_theta_out) / (n2 * cos_theta_in + n1 * cos_theta_out);
-    float refl_p_polarized = (n2 * cos_theta_in - n1 * cos_theta_out) / (n1 * cos_theta_in + n2 * cos_theta_out);
-    float probablity_of_reflection = (refl_s_polarized * refl_s_polarized + refl_p_polarized * refl_p_polarized) * 0.5;
+    float refl_s_polarized = sq((n1 * cos_in - n2 * cos_out) / (n1 * cos_in + n2 * cos_out));
+    float refl_p_polarized = sq((n1 * cos_out - n2 * cos_in) / (n1 * cos_out + n2 * cos_in));
+    float prob_of_reflection = (refl_s_polarized + refl_p_polarized) * 0.5;
 
-    float roll = 1.0;   // TODO: add random
-    if (roll < probablity_of_reflection) {
-        // TODO: calculate reflected ray
+    float roll = sin_rand();
+
+    if (roll < prob_of_reflection) {
+        w_out = reflect(-w_in, modified_normal);
+        // TODO: calculate correct probability
+        prob = prob_of_reflection * 1 / PI;
     } else {
-        // TODO: take `glossiness` into account?
-        w_out = (n1 / n2) * (-w_in) + (n1 / n2 * cos_theta_in - cos_theta_out) * normal;
-        prob = 1 - probablity_of_reflection;
+        w_out = (n1 / n2) * (-w_in) + (n1 / n2 * cos_in - cos_out) * -modified_normal;
+        // TODO: calculate correct probability
+        prob = 1 - prob_of_reflection;
     }
 }
 
@@ -108,8 +174,14 @@ bool sphere_intersect(Object sphere, Ray ray, out vec3 intersection_point) {
 }
 
 vec3 sphere_normal(Object sphere, vec3 point) {
+    // Affine transformations don't preserve normal vectors
+    // so we can't do inverse_transform > find normal > transform
+
+    // TODO: this works with translation and scaling, but it may
+    // break under rotation
     vec3 center = (sphere.transform * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-    return normalize(point - center);
+    vec3 abc = (sphere.transform * vec4(1.0, 1.0, 1.0, 0.0)).xyz;
+    return normalize(2.0 * (point - center) / (abc * abc));
 }
 
 struct PointLight {
@@ -135,7 +207,7 @@ const Object SPHERES[2] = Object[2](
             0.0, 0.0, 3.33333, 0,
             1.66667, 1.66667, -5, 1
         ),
-        Material(1.0, 1.4, vec3(0.5, 0.1, 0.1))
+        Material(1.01, 0.99, vec3(0.8, 0.6, 0.6))
     ),
     Object(
         mat4(
@@ -150,7 +222,7 @@ const Object SPHERES[2] = Object[2](
             0.0, 0.0, 3.33333, 0,
             0.0, 1, -16.66667, 1
         ),
-        Material(1.0, 10000, vec3(0.1, 0.4, 0.1))
+        Material(1000, 0.3, vec3(0.1, 0.4, 0.1))
     )
 );
 
@@ -193,33 +265,40 @@ void main() {
     vec3 out_color = vec3(0.0, 0.0, 0.0);
     vec3 light_mult = vec3(1.0, 1.0, 1.0);
 
-    IntersectionInfo intersect = trace_ray(ray);
+    const uint MAX_DEPTH = 8;
 
-    const uint MAX_DEPTH = 1;
+    for (uint i = 0; i < MAX_DEPTH; i++) {
+        IntersectionInfo intersect = trace_ray(ray);
 
-    if (intersect.object != -1) {
-        for (uint i = 0; i < MAX_DEPTH; i++) {
-            Object intersect_object = SPHERES[intersect.object];
-            vec3 light_sample = point_light_sample(LIGHTS[0]);
-            float dist_to_light = distance(light_sample, intersect.point);
-
-            Ray light_ray = Ray(intersect.point + 0.000061035 * sphere_normal(intersect_object, intersect.point), normalize(light_sample - intersect.point));
-            IntersectionInfo light_intersect = trace_ray(light_ray);
-
-            if (dist_to_light < light_intersect.dist) {
-                vec3 object_normal = sphere_normal(intersect_object, intersect.point);
-                float prob = brdf_eval(intersect_object.material, -ray.dir, light_ray.dir, object_normal);
-                out_color += LIGHTS[0].color * intersect_object.material.color * light_mult * prob;
-            }
-
-            // TODO:
-            // normal_ray = brdf_spawn_ray();
+        if (intersect.object == -1) {
+            out_color += vec3(0.0, 0.0, 0.05) * light_mult;
+            break;
         }
 
-        out_color /= MAX_DEPTH;
-    } else {
-        out_color = vec3(0.0, 0.0, 0.05);
+        Object obj = SPHERES[intersect.object];
+        vec3 obj_normal = sphere_normal(obj, intersect.point);
+
+        // Trace ray from intersection to a light source
+        vec3 light_sample = point_light_sample(LIGHTS[0]);
+        float dist_to_light = distance(light_sample, intersect.point);
+        Ray light_ray = Ray(intersect.point + 0.000061035 * obj_normal, normalize(light_sample - intersect.point));
+        IntersectionInfo light_intersect = trace_ray(light_ray);
+
+        if (dist_to_light < light_intersect.dist) {
+            float prob = brdf_eval(obj.material, -ray.dir, light_ray.dir, obj_normal);
+            out_color += LIGHTS[0].color * obj.material.color * light_mult * prob;
+        }
+
+        // Continue tracing the original ray
+        vec3 w_out;
+        float prob;
+        brdf_spawn_ray(obj.material, -ray.dir, obj_normal, 1.0, w_out, prob);
+
+        ray = Ray(intersect.point + 0.000061035 * w_out, w_out);
+        light_mult *= obj.material.color * prob;
     }
+
+    // out_color /= N_RAYS;
 
     imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(out_color.bgr, 1.0));
 }
