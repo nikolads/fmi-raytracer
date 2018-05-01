@@ -95,7 +95,7 @@ float brdf_eval(Material material, vec3 w_in, vec3 w_out, vec3 normal) {
 void brdf_spawn_ray(Material material, vec3 w_in, vec3 normal, float medium_refr_index, out vec3 w_out, out float prob) {
     float n1, n2;
 
-    if (dot(w_in, normal) > 0.0) {
+    if (dot(w_in, normal) >= 0.0) {
         n1 = medium_refr_index;
         n2 = material.refr_index;
     } else {
@@ -107,7 +107,7 @@ void brdf_spawn_ray(Material material, vec3 w_in, vec3 normal, float medium_refr
     // vec3 e2, e3;
     // orthonormal_system(normal, e2, e3);
 
-    // float scaling = tan(1 - material.glossiness * PI / 2);
+    // // float scaling = tan(1 - material.glossiness * PI / 2);
     // float scaling = 1 - material.glossiness;
     // vec2 disc_sample = scaling * random_unit_disc_sample();
     // vec3 modified_normal = normalize(normal + disc_sample.x * e2 + disc_sample.y * e3);
@@ -135,7 +135,7 @@ void brdf_spawn_ray(Material material, vec3 w_in, vec3 normal, float medium_refr
         // TODO: calculate correct probability
         prob = prob_of_reflection * 1 / PI;
     } else {
-        w_out = (n1 / n2) * (-w_in) + (n1 / n2 * cos_in - cos_out) * -modified_normal;
+        w_out = (n1 / n2) * (-w_in) + (n1 / n2 * cos_in - cos_out) * modified_normal;
         // TODO: calculate correct probability
         prob = 1 - prob_of_reflection;
     }
@@ -199,35 +199,51 @@ const Object SPHERES[2] = Object[2](
             0.3, 0.0, 0.0, 0,
             0.0, 0.3, 0.0, 0,
             0.0, 0.0, 0.3, 0,
-            -0.5, -0.5, 1.5, 1
+            -0.5, -0.2, 1.5, 1
         ),
         mat4(
             3.33333, 0.0, 0.0, 0,
             0.0, 3.33333, 0.0, 0,
             0.0, 0.0, 3.33333, 0,
-            1.66667, 1.66667, -5, 1
+            1.66667, 0.66667, -5, 1
         ),
-        Material(1.01, 0.99, vec3(0.8, 0.6, 0.6))
+        Material(100, 0.01, vec3(1.0, 0.8, 0.8))
     ),
+    // Object(
+    //     mat4(
+    //         0.8, 0.0, 0.0, 0,
+    //         0.0, 0.3, 0.0, 0,
+    //         0.0, 0.0, 0.3, 0,
+    //         0.0, -0.3, 2.5, 1
+    //     ),
+    //     mat4(
+    //         1.25, 0.0, 0.0, 0,
+    //         0.0, 3.33333, 0.0, 0,
+    //         0.0, 0.0, 3.33333, 0,
+    //         0.0, 1, -8.3333, 1
+    //     ),
+    //     Material(1000, 0.3, vec3(0.25, 0.9, 0.25))
+    // )
     Object(
         mat4(
-            0.8, 0.0, 0.0, 0,
+            0.3, 0.0, 0.0, 0,
             0.0, 0.3, 0.0, 0,
             0.0, 0.0, 0.3, 0,
-            0.0, -0.3, 5, 1
+            0.5, -0.2, 1.5, 1
         ),
         mat4(
-            1.25, 0.0, 0.0, 0,
+            3.33333, 0.0, 0.0, 0,
             0.0, 3.33333, 0.0, 0,
             0.0, 0.0, 3.33333, 0,
-            0.0, 1, -16.66667, 1
+            -1.66667, 0.66667, -5, 1
         ),
-        Material(1000, 0.3, vec3(0.1, 0.4, 0.1))
+        Material(100, 0.03, vec3(0.25, 0.9, 0.25))
     )
 );
 
 const PointLight LIGHTS[1] = PointLight[1](
-    PointLight(vec3(-0.9, -0.9, 0.6), vec3(1, 1, 3))
+    PointLight(vec3(-1.4, -1.3, -2), vec3(1, 1, 3))
+    // PointLight(vec3(-0.9, -0.9, 0.6), vec3(1, 1, 3))
 );
 
 const vec3 SPHERE_COLOR = vec3(0.5, 0.0, 0.0);
@@ -265,13 +281,14 @@ void main() {
     vec3 out_color = vec3(0.0, 0.0, 0.0);
     vec3 light_mult = vec3(1.0, 1.0, 1.0);
 
+    const vec3 BACKGROUND_COLOR = vec3(0.1, 0.1, 0.1);
     const uint MAX_DEPTH = 8;
 
     for (uint i = 0; i < MAX_DEPTH; i++) {
         IntersectionInfo intersect = trace_ray(ray);
 
         if (intersect.object == -1) {
-            out_color += vec3(0.0, 0.0, 0.05) * light_mult;
+            out_color += BACKGROUND_COLOR * light_mult;
             break;
         }
 
@@ -299,6 +316,10 @@ void main() {
     }
 
     // out_color /= N_RAYS;
+
+    // apply gamma correction
+    // TODO: do I need this, framebuffer color space is sRGB?
+    out_color = pow(out_color, vec3(2.2));
 
     imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(out_color.bgr, 1.0));
 }
