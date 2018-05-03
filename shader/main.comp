@@ -4,6 +4,7 @@
 const int WIDTH = 800;
 const int HEIGHT = 600;
 const int WORKGROUP_SIZE = 32;
+const int N_RAYS = 2;
 layout(local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 
 layout(binding = 0, rgba8) writeonly restrict uniform image2D work_image;
@@ -277,6 +278,8 @@ void main() {
     // In order to fit the work into workgroups, some unnecessary threads are launched.
     if (gl_GlobalInvocationID.x >= WIDTH || gl_GlobalInvocationID.y >= HEIGHT) { return; }
 
+    RNG_STATE = gl_GlobalInvocationID.z * 1000;
+
     Ray ray = screen_ray(gl_GlobalInvocationID.xy);
     vec3 out_color = vec3(0.0, 0.0, 0.0);
     vec3 light_mult = vec3(1.0, 1.0, 1.0);
@@ -315,11 +318,14 @@ void main() {
         light_mult *= obj.material.color * prob;
     }
 
-    // out_color /= N_RAYS;
+    out_color /= float(N_RAYS);
 
     // apply gamma correction
     // TODO: do I need this, framebuffer color space is sRGB?
-    out_color = pow(out_color, vec3(2.2));
+    // TODO: must be applied after the sum
+    // out_color = pow(out_color, vec3(2.2));
 
+    // vec4 image_color = imageLoad(work_image, ivec2(gl_GlobalInvocationID.xy));
+    // imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), image_color + vec4(out_color.bgr, 1.0));
     imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(out_color.bgr, 1.0));
 }

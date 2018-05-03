@@ -57,19 +57,21 @@ std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createI
     vk::Device device, vk::PhysicalDevice physical, vk::Extent2D extent)
 {
     const auto info = vk::ImageCreateInfo(
-        vk::ImageCreateFlags(),                                                     // flags
-        vk::ImageType::e2D,                                                         // imageType
-        vk::Format::eR8G8B8A8Srgb,                                                  // format
-        vk::Extent3D(extent.width, extent.height, 1),                               // extent
-        1,                                                                          // mipLevels
-        1,                                                                          // arrayLayers
-        vk::SampleCountFlagBits::e1,                                                // samples
-        vk::ImageTiling::eOptimal,                                                  // tiling
-        vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage,    // usage
-        vk::SharingMode::eExclusive,                                                // sharingMode
-        0,                                                                          // queueFamilyIndexCount
-        nullptr,                                                                    // pQueueFamilyIndices
-        vk::ImageLayout::eUndefined                                                 // initialLayout
+        vk::ImageCreateFlags(),                         // flags
+        vk::ImageType::e2D,                             // imageType
+        vk::Format::eR8G8B8A8Srgb,                      // format
+        vk::Extent3D(extent.width, extent.height, 1),   // extent
+        1,                                              // mipLevels
+        1,                                              // arrayLayers
+        vk::SampleCountFlagBits::e1,                    // samples
+        vk::ImageTiling::eOptimal,                      // tiling
+        vk::ImageUsageFlagBits::eTransferSrc |
+            vk::ImageUsageFlagBits::eTransferDst |
+            vk::ImageUsageFlagBits::eStorage,           // usage
+        vk::SharingMode::eExclusive,                    // sharingMode
+        0,                                              // queueFamilyIndexCount
+        nullptr,                                        // pQueueFamilyIndices
+        vk::ImageLayout::eUndefined                     // initialLayout
     );
 
     auto image = device.createImageUnique(info, nullptr);
@@ -266,7 +268,9 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
             ),
             vk::ImageMemoryBarrier(
                 vk::AccessFlags(),                      // srcAccessMask
-                vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
+                vk::AccessFlagBits::eMemoryWrite |
+                    vk::AccessFlagBits::eShaderRead |
+                    vk::AccessFlagBits::eShaderWrite,       // dstAccessMask
                 vk::ImageLayout::eUndefined,            // oldLayout
                 vk::ImageLayout::eGeneral,              // newLayout
                 queues.computeQueueFamily,              // srcQueueFamilyIndex
@@ -294,10 +298,21 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
             initialLayouts.data()                       // pImageMemoryBarriers
         );
 
+        auto clearRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+        auto clearColor = vk::ClearColorValue(make_array(0.0f, 0.0f, 0.0f, 1.0f));
+        buffer->clearColorImage(
+            workImage,                                  // image
+            vk::ImageLayout::eGeneral,                  // imageLayout
+            &clearColor,                                // pColor
+            1,                                          // rangeCount
+            &clearRange                                 // pRange
+        );
+
         const size_t WORKGROUP_SIZE = 32;
+        const size_t N_RAYS = 2;
         auto workgroupsX = (extent.width / WORKGROUP_SIZE) + (extent.width % WORKGROUP_SIZE != 0);
         auto workgroupsY = (extent.height / WORKGROUP_SIZE) + (extent.height % WORKGROUP_SIZE != 0);
-        buffer->dispatch(workgroupsX, workgroupsY, 1);
+        buffer->dispatch(workgroupsX, workgroupsY, N_RAYS);
 
         const auto generalToTransfer = vk::ImageMemoryBarrier(
             vk::AccessFlags(),                      // srcAccessMask
