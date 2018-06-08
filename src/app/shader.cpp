@@ -59,7 +59,7 @@ std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createI
     const auto info = vk::ImageCreateInfo(
         vk::ImageCreateFlags(),                         // flags
         vk::ImageType::e2D,                             // imageType
-        vk::Format::eR8G8B8A8Srgb,                      // format
+        vk::Format::eR8G8B8A8Unorm,                     // format
         vk::Extent3D(extent.width, extent.height, 1),   // extent
         1,                                              // mipLevels
         1,                                              // arrayLayers
@@ -89,7 +89,7 @@ std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createI
         vk::ImageViewCreateFlags(),             // flags
         *image,                                 // image
         vk::ImageViewType::e2D,                 // viewType
-        vk::Format::eR8G8B8A8Srgb,              // format
+        vk::Format::eR8G8B8A8Unorm,             // format
         vk::ComponentMapping(),                 // components
         vk::ImageSubresourceRange(              // subresourceRange
             vk::ImageAspectFlagBits::eColor,        // aspectMask
@@ -309,7 +309,7 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
         );
 
         const size_t WORKGROUP_SIZE = 32;
-        const size_t N_RAYS = 2;
+        const size_t N_RAYS = 4;
         auto workgroupsX = (extent.width / WORKGROUP_SIZE) + (extent.width % WORKGROUP_SIZE != 0);
         auto workgroupsY = (extent.height / WORKGROUP_SIZE) + (extent.height % WORKGROUP_SIZE != 0);
         buffer->dispatch(workgroupsX, workgroupsY, N_RAYS);

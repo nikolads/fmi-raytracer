@@ -4,10 +4,10 @@
 const int WIDTH = 800;
 const int HEIGHT = 600;
 const int WORKGROUP_SIZE = 32;
-const int N_RAYS = 2;
+const int N_RAYS = 4;
 layout(local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 
-layout(binding = 0, rgba8) writeonly restrict uniform image2D work_image;
+layout(binding = 0, rgba8) restrict uniform image2D work_image;
 
 const float PI = 3.14159265358979323846264338327950288;
 
@@ -320,12 +320,6 @@ void main() {
 
     out_color /= float(N_RAYS);
 
-    // apply gamma correction
-    // TODO: do I need this, framebuffer color space is sRGB?
-    // TODO: must be applied after the sum
-    // out_color = pow(out_color, vec3(2.2));
-
-    // vec4 image_color = imageLoad(work_image, ivec2(gl_GlobalInvocationID.xy));
-    // imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), image_color + vec4(out_color.bgr, 1.0));
-    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(out_color.bgr, 1.0));
+    vec4 image_color = imageLoad(work_image, ivec2(gl_GlobalInvocationID.xy));
+    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), image_color + vec4(out_color.bgr, 1.0));
 }

@@ -27,7 +27,6 @@ target/release/Makefile:
 	@mkdir -p target/$(PROFILE)
 	@cmake -Btarget/$(PROFILE) -H. -DCMAKE_DEBUG_BUILD=OFF -DCMAKE_INSTALL_PREFIX=$(shell pwd)/target/$(PROFILE)
 
-
 build-shaders: shader/comp.spv
 
 shader/comp.spv: shader/main.comp
@@ -43,7 +42,6 @@ target/deps/Vulkan-Hpp:
 	@echo -e " $(c)Downloading$(r) Vulkan-Hpp"
 	@mkdir -p target/deps/Vulkan-Hpp
 	@git clone https://github.com/KhronosGroup/Vulkan-Hpp target/deps/Vulkan-Hpp
-	@cd target/deps/Vulkan-Hpp && git checkout 141e8ce93b47bbbf7e8217a897a427a56a2d32b1
 
 .PHONY: clean
 clean:
