@@ -4,9 +4,8 @@
 const int WIDTH = 800;
 const int HEIGHT = 600;
 const int WORKGROUP_SIZE = 32;
-const int N_RAYS = 4;
+const int N_RAYS = 2;
 layout(local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
-
 layout(binding = 0, rgba8) restrict uniform image2D work_image;
 
 const float PI = 3.14159265358979323846264338327950288;
@@ -55,10 +54,186 @@ void orthonormal_system(vec3 in_ray, out vec3 ray1, out vec3 ray2) {
     }
 }
 
+// uses Schlick's approximation
+vec3 specular_reflection(vec3 color, vec3 w_in, vec3 normal) {
+    float cos_term = 1 - dot(w_in, normal);
+    float cos_term_pow2 = cos_term * cos_term;
+    float cos_term_pow4 = cos_term_pow2 * cos_term_pow2;
+    float cos_term_pow5 = cos_term_pow4 * cos_term;
+
+    return color + (1 - color) * cos_term_pow5;
+}
+
 struct Ray {
     vec3 start;
     vec3 dir;
 };
+
+Ray screen_ray(uvec2 pixel);
+
+struct IntersectionInfo {
+    int object;
+    vec3 point;
+    float dist;
+};
+
+IntersectionInfo trace_ray(Ray ray);
+
+struct Material {
+    /// Diffuse color.
+    ///
+    /// Ratio between the energy of light which is scattered back from the interior
+    /// of the object to the energy which is absorbed. Used to model local subsurface
+    /// scattering.
+    ///
+    /// Must be between 0.0 and 1.0.
+    vec3 diff_color;
+
+    /// Color of specular reflections.
+    ///
+    /// This is a specific constant for each material and is the value of the
+    /// Fresnel equations evaluated at 0 degrees. Depends on the index of refraction
+    /// of the material and the surrounding medium.
+    ///
+    /// Must be between 0.0 and 1.0.
+    vec3 spec_color;
+
+    /// Index of refraction of the material.
+    ///
+    /// Should be compatible with `spec_color`.
+    /// Used for refracting rays through transperent materials.
+    float refr_index;
+
+    /// Arbitrary parameter for specular reflections.
+    ///
+    /// Determines how rough the surface of the material is at the microscopic level.
+    /// Higher values mean smoother and more reflective material.
+    ///
+    /// Must be between 1.0 and +inf.
+    float roughness;
+};
+
+vec3 material_brdf(Material material, vec3 w_in, vec3 w_out, vec3 normal);
+void material_spawn_ray(Material material, vec3 w_in, vec3 normal, out vec3 w_out, out vec3 color_mult);
+
+struct Object {
+    mat4 transform;
+    mat4 inv_transform;
+    Material material;
+};
+
+vec3 sphere_normal(Object sphere, vec3 point);
+bool sphere_intersect(Object sphere, Ray ray, out vec3 intersection_point);
+
+struct PointLight {
+    vec3 pos;
+    vec3 color;
+};
+
+vec3 point_light_sample(PointLight light);
+
+const Object SPHERES[2] = Object[2](
+    Object(
+        mat4(
+            0.3, 0.0, 0.0, 0,
+            0.0, 0.3, 0.0, 0,
+            0.0, 0.0, 0.3, 0,
+            -0.4, -0.2, 1.5, 1
+        ),
+        mat4(
+            3.33333, 0.0, 0.0, 0,
+            0.0, 3.33333, 0.0, 0,
+            0.0, 0.0, 3.33333, 0,
+            1.33333, 0.66667, -5, 1
+        ),
+        Material(vec3(0.8, 0.8, 0.8), vec3(0.05, 0.05, 0.05), 10, 64)
+    ),
+    // Object(
+    //     mat4(
+    //         0.2, 0.0, 0.0, 0,
+    //         0.0, 0.2, 0.0, 0,
+    //         0.0, 0.0, 0.2, 0,
+    //         -0.5, -0.2, 1.5, 1
+    //     ),
+    //     mat4(
+    //         5, 0.0, 0.0, 0,
+    //         0.0, 5, 0.0, 0,
+    //         0.0, 0.0, 5, 0,
+    //         2.5, 1, -7.5, 1
+    //     ),
+    //     Material(1000, 0.0, vec3(0, 0, 0))
+    // ),
+    Object(
+        mat4(
+            0.3, 0.0, 0.0, 0,
+            0.0, 0.3, 0.0, 0,
+            0.0, 0.0, 0.3, 0,
+            0.4, -0.2, 1.5, 1
+        ),
+        mat4(
+            3.33333, 0.0, 0.0, 0,
+            0.0, 3.33333, 0.0, 0,
+            0.0, 0.0, 3.33333, 0,
+            -1.33333, 0.66667, -5, 1
+        ),
+        Material(vec3(0.8, 0.2, 0.2), vec3(0.05, 0.05, 0.05), 10, 8)
+    )
+);
+
+const PointLight LIGHTS[1] = PointLight[1](
+    PointLight(vec3(0, -1, 0), vec3(1.5, 1.5, 1.5))
+    // PointLight(vec3(-0.9, -0.9, 0.6), vec3(1, 1, 3))
+);
+
+void main() {
+    // In order to fit the work into workgroups, some unnecessary threads are launched.
+    if (gl_GlobalInvocationID.x >= WIDTH || gl_GlobalInvocationID.y >= HEIGHT) { return; }
+
+    RNG_STATE = gl_GlobalInvocationID.z * 1000;
+
+    Ray ray = screen_ray(gl_GlobalInvocationID.xy);
+    vec3 out_color = vec3(0.0, 0.0, 0.0);
+    vec3 light_mult = vec3(1.0, 1.0, 1.0);
+
+    const vec3 BACKGROUND_COLOR = vec3(0.1, 0.1, 0.1);
+    const uint MAX_DEPTH = 4;
+
+    for (uint i = 0; i < MAX_DEPTH; i++) {
+        IntersectionInfo intersect = trace_ray(ray);
+
+        if (intersect.object == -1) {
+            out_color += BACKGROUND_COLOR * light_mult;
+            break;
+        }
+
+        Object obj = SPHERES[intersect.object];
+        vec3 obj_normal = sphere_normal(obj, intersect.point);
+
+        // Trace ray from intersection to a light source
+        vec3 light_sample = point_light_sample(LIGHTS[0]);
+        float dist_to_light = distance(light_sample, intersect.point);
+        Ray light_ray = Ray(intersect.point + 0.000061035 * obj_normal, normalize(light_sample - intersect.point));
+        IntersectionInfo light_intersect = trace_ray(light_ray);
+
+        if (dist_to_light < light_intersect.dist) {
+            vec3 brdf_color = material_brdf(obj.material, -ray.dir, light_ray.dir, obj_normal);
+            out_color += LIGHTS[0].color * brdf_color * light_mult * dot(light_ray.dir, obj_normal);
+        }
+
+        // Continue tracing the original ray
+        vec3 w_out;
+        vec3 color_mult;
+        material_spawn_ray(obj.material, -ray.dir, obj_normal, w_out, color_mult);
+
+        ray = Ray(intersect.point + 0.000061035 * w_out, w_out);
+        light_mult *= color_mult;
+    }
+
+    out_color /= float(N_RAYS);
+
+    vec4 image_color = imageLoad(work_image, ivec2(gl_GlobalInvocationID.xy));
+    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), image_color + vec4(out_color.bgr, 1.0));
+}
 
 Ray screen_ray(uvec2 pixel) {
     const float ASPECT_RATIO = float(HEIGHT) / float(WIDTH);
@@ -75,78 +250,51 @@ Ray screen_ray(uvec2 pixel) {
     return Ray(origin, dir);
 }
 
-struct Material {
-    float refr_index;
-    float glossiness;
-    vec3 color;
-};
+IntersectionInfo trace_ray(Ray ray) {
+    IntersectionInfo info = IntersectionInfo(-1, vec3(0, 0, 0), 1.0 / 0.0);
 
-float brdf_eval(Material material, vec3 w_in, vec3 w_out, vec3 normal) {
-    if (dot(w_in, w_out) < 0) {
-        return 0.0;
-    } else {
-        // TODO: this is probably not accurate
-        return pow(dot(w_out, normal), 1 / (1 - material.glossiness));
+    for (uint i = 0; i < SPHERES.length(); i++) {
+        Object object = SPHERES[i];
+        vec3 intersection_point;
+
+        if (sphere_intersect(object, ray, intersection_point)) {
+            float dist_to_intersection = distance(ray.start, intersection_point);
+
+            if (dist_to_intersection < info.dist) {
+                info = IntersectionInfo(int(i), intersection_point, dist_to_intersection);
+            }
+        }
     }
+
+    return info;
 }
 
+/// Calculate brdf value.
 ///
-///
-/// Assumes `w_in` and `normal` are normalized vectors
-void brdf_spawn_ray(Material material, vec3 w_in, vec3 normal, float medium_refr_index, out vec3 w_out, out float prob) {
-    float n1, n2;
-
-    if (dot(w_in, normal) >= 0.0) {
-        n1 = medium_refr_index;
-        n2 = material.refr_index;
-    } else {
-        n1 = material.refr_index;
-        n2 = medium_refr_index;
-        normal = -normal;
+/// Uses the Lambertian model for local subsurface scattering
+/// and the Blinn-Phong model for specular reflection.
+vec3 material_brdf(Material material, vec3 w_in, vec3 w_out, vec3 normal) {
+    if (dot(w_in, normal) < 0 || dot(w_out, normal) < 0) {
+        return vec3(0.0, 0.0, 0.0);
     }
 
-    // vec3 e2, e3;
-    // orthonormal_system(normal, e2, e3);
+    vec3 halfv = normalize(w_in + w_out);
+    vec3 spec = specular_reflection(material.spec_color, w_in, halfv);
+    vec3 diff = (1 - spec) * material.diff_color;
+    float ndf = (material.roughness + 8) / (8 * PI) * pow(dot(normal, halfv), material.roughness);
 
-    // // float scaling = tan(1 - material.glossiness * PI / 2);
-    // float scaling = 1 - material.glossiness;
-    // vec2 disc_sample = scaling * random_unit_disc_sample();
-    // vec3 modified_normal = normalize(normal + disc_sample.x * e2 + disc_sample.y * e3);
-    vec3 modified_normal = normal;
-
-    // check if the ray reflects or refracts
-    // // using Schlick's approximation
-    // float r0 = (n1 - n2) / (n1 + n2) * (n1 - n2) / (n1 + n2);
-    // float cos_theta_in = dot(w_in, normal);
-    // float probablity_of_reflection = r0 + (1 - r0) * pow(1 - cos_theta_in, 5);
-
-    // using Fresnel's equations
-    float cos_in = dot(w_in, modified_normal);
-    float sin_out_sq = (n1 / n2) * (n1 / n2) * (1 - cos_in * cos_in);
-    float cos_out = sqrt(1 - sin_out_sq);
-
-    float refl_s_polarized = sq((n1 * cos_in - n2 * cos_out) / (n1 * cos_in + n2 * cos_out));
-    float refl_p_polarized = sq((n1 * cos_out - n2 * cos_in) / (n1 * cos_out + n2 * cos_in));
-    float prob_of_reflection = (refl_s_polarized + refl_p_polarized) * 0.5;
-
-    float roll = sin_rand();
-
-    if (roll < prob_of_reflection) {
-        w_out = reflect(-w_in, modified_normal);
-        // TODO: calculate correct probability
-        prob = prob_of_reflection * 1 / PI;
-    } else {
-        w_out = (n1 / n2) * (-w_in) + (n1 / n2 * cos_in - cos_out) * modified_normal;
-        // TODO: calculate correct probability
-        prob = 1 - prob_of_reflection;
-    }
+    return (1 / PI) * diff + ndf * spec;
 }
 
-struct Object {
-    mat4 transform;
-    mat4 inv_transform;
-    Material material;
-};
+void material_spawn_ray(Material material, vec3 w_in, vec3 normal, out vec3 w_out, out vec3 color_mult) {
+    // TODO: model refraction
+    // TODO: model roughness
+
+    vec3 refl_prob = specular_reflection(material.spec_color, w_in, normal);
+
+    w_out = reflect(-w_in, normal);
+    color_mult = refl_prob;
+}
 
 bool sphere_intersect(Object sphere, Ray ray, out vec3 intersection_point) {
     Ray norm_ray = Ray(
@@ -185,141 +333,6 @@ vec3 sphere_normal(Object sphere, vec3 point) {
     return normalize(2.0 * (point - center) / (abc * abc));
 }
 
-struct PointLight {
-    vec3 pos;
-    vec3 color;
-};
-
 vec3 point_light_sample(PointLight light) {
     return light.pos;
-}
-
-const Object SPHERES[2] = Object[2](
-    Object(
-        mat4(
-            0.3, 0.0, 0.0, 0,
-            0.0, 0.3, 0.0, 0,
-            0.0, 0.0, 0.3, 0,
-            -0.5, -0.2, 1.5, 1
-        ),
-        mat4(
-            3.33333, 0.0, 0.0, 0,
-            0.0, 3.33333, 0.0, 0,
-            0.0, 0.0, 3.33333, 0,
-            1.66667, 0.66667, -5, 1
-        ),
-        Material(100, 0.01, vec3(1.0, 0.8, 0.8))
-    ),
-    // Object(
-    //     mat4(
-    //         0.8, 0.0, 0.0, 0,
-    //         0.0, 0.3, 0.0, 0,
-    //         0.0, 0.0, 0.3, 0,
-    //         0.0, -0.3, 2.5, 1
-    //     ),
-    //     mat4(
-    //         1.25, 0.0, 0.0, 0,
-    //         0.0, 3.33333, 0.0, 0,
-    //         0.0, 0.0, 3.33333, 0,
-    //         0.0, 1, -8.3333, 1
-    //     ),
-    //     Material(1000, 0.3, vec3(0.25, 0.9, 0.25))
-    // )
-    Object(
-        mat4(
-            0.3, 0.0, 0.0, 0,
-            0.0, 0.3, 0.0, 0,
-            0.0, 0.0, 0.3, 0,
-            0.5, -0.2, 1.5, 1
-        ),
-        mat4(
-            3.33333, 0.0, 0.0, 0,
-            0.0, 3.33333, 0.0, 0,
-            0.0, 0.0, 3.33333, 0,
-            -1.66667, 0.66667, -5, 1
-        ),
-        Material(100, 0.03, vec3(0.25, 0.9, 0.25))
-    )
-);
-
-const PointLight LIGHTS[1] = PointLight[1](
-    PointLight(vec3(-1.4, -1.3, -2), vec3(1, 1, 3))
-    // PointLight(vec3(-0.9, -0.9, 0.6), vec3(1, 1, 3))
-);
-
-const vec3 SPHERE_COLOR = vec3(0.5, 0.0, 0.0);
-
-struct IntersectionInfo {
-    int object;
-    vec3 point;
-    float dist;
-};
-
-IntersectionInfo trace_ray(Ray ray) {
-    IntersectionInfo info = IntersectionInfo(-1, vec3(0, 0, 0), 1.0 / 0.0);
-
-    for (uint i = 0; i < SPHERES.length(); i++) {
-        Object object = SPHERES[i];
-        vec3 intersection_point;
-
-        if (sphere_intersect(object, ray, intersection_point)) {
-            float dist_to_intersection = distance(ray.start, intersection_point);
-
-            if (dist_to_intersection < info.dist) {
-                info = IntersectionInfo(int(i), intersection_point, dist_to_intersection);
-            }
-        }
-    }
-
-    return info;
-}
-
-void main() {
-    // In order to fit the work into workgroups, some unnecessary threads are launched.
-    if (gl_GlobalInvocationID.x >= WIDTH || gl_GlobalInvocationID.y >= HEIGHT) { return; }
-
-    RNG_STATE = gl_GlobalInvocationID.z * 1000;
-
-    Ray ray = screen_ray(gl_GlobalInvocationID.xy);
-    vec3 out_color = vec3(0.0, 0.0, 0.0);
-    vec3 light_mult = vec3(1.0, 1.0, 1.0);
-
-    const vec3 BACKGROUND_COLOR = vec3(0.1, 0.1, 0.1);
-    const uint MAX_DEPTH = 8;
-
-    for (uint i = 0; i < MAX_DEPTH; i++) {
-        IntersectionInfo intersect = trace_ray(ray);
-
-        if (intersect.object == -1) {
-            out_color += BACKGROUND_COLOR * light_mult;
-            break;
-        }
-
-        Object obj = SPHERES[intersect.object];
-        vec3 obj_normal = sphere_normal(obj, intersect.point);
-
-        // Trace ray from intersection to a light source
-        vec3 light_sample = point_light_sample(LIGHTS[0]);
-        float dist_to_light = distance(light_sample, intersect.point);
-        Ray light_ray = Ray(intersect.point + 0.000061035 * obj_normal, normalize(light_sample - intersect.point));
-        IntersectionInfo light_intersect = trace_ray(light_ray);
-
-        if (dist_to_light < light_intersect.dist) {
-            float prob = brdf_eval(obj.material, -ray.dir, light_ray.dir, obj_normal);
-            out_color += LIGHTS[0].color * obj.material.color * light_mult * prob;
-        }
-
-        // Continue tracing the original ray
-        vec3 w_out;
-        float prob;
-        brdf_spawn_ray(obj.material, -ray.dir, obj_normal, 1.0, w_out, prob);
-
-        ray = Ray(intersect.point + 0.000061035 * w_out, w_out);
-        light_mult *= obj.material.color * prob;
-    }
-
-    out_color /= float(N_RAYS);
-
-    vec4 image_color = imageLoad(work_image, ivec2(gl_GlobalInvocationID.xy));
-    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), image_color + vec4(out_color.bgr, 1.0));
 }
