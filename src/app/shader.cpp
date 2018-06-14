@@ -59,7 +59,7 @@ std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createI
     const auto info = vk::ImageCreateInfo(
         vk::ImageCreateFlags(),                         // flags
         vk::ImageType::e2D,                             // imageType
-        vk::Format::eR8G8B8A8Unorm,                     // format
+        vk::Format::eR32G32B32A32Sfloat,                // format
         vk::Extent3D(extent.width, extent.height, 1),   // extent
         1,                                              // mipLevels
         1,                                              // arrayLayers
@@ -89,7 +89,7 @@ std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createI
         vk::ImageViewCreateFlags(),             // flags
         *image,                                 // image
         vk::ImageViewType::e2D,                 // viewType
-        vk::Format::eR8G8B8A8Unorm,             // format
+        vk::Format::eR32G32B32A32Sfloat,        // format
         vk::ComponentMapping(),                 // components
         vk::ImageSubresourceRange(              // subresourceRange
             vk::ImageAspectFlagBits::eColor,        // aspectMask
@@ -343,31 +343,35 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
             &generalToTransfer                          // pImageMemoryBarriers
         );
 
-        const auto copyInfo = vk::ImageCopy(
+        const auto offsets = make_array(
+            vk::Offset3D(0, 0, 0),
+            vk::Offset3D(extent.width, extent.height, 1));
+
+        const auto copyInfo = vk::ImageBlit(
             vk::ImageSubresourceLayers(                     // srcSubresource
                 vk::ImageAspectFlagBits::eColor,                // aspectMask
                 0,                                              // mipLevel
                 0,                                              // baseArrayLayer
                 1                                               // layerCount
             ),
-            vk::Offset3D(0, 0, 0),                          // srcOffset
+            offsets,                                        // srcOffsets
             vk::ImageSubresourceLayers(                     // dstSubresource
                 vk::ImageAspectFlagBits::eColor,                // aspectMask
                 0,                                              // mipLevel
                 0,                                              // baseArrayLayer
                 1                                               // layerCount
             ),
-            vk::Offset3D(0, 0, 0),                          // dstOffset
-            vk::Extent3D(extent.width, extent.height, 1)    // extent
+            offsets                                         // dstOffsets
         );
 
-        buffer->copyImage(
+        buffer->blitImage(
             workImage,                              // srcImage
             vk::ImageLayout::eTransferSrcOptimal,   // srcImageLayout
             image,                                  // dstImage
             vk::ImageLayout::eTransferDstOptimal,   // dstImageLayout
             1,                                      // regionCount
-            &copyInfo                               // pRegions
+            &copyInfo,                              // pRegions
+            vk::Filter::eNearest                    // filter
         );
 
         const auto transferToPresent = vk::ImageMemoryBarrier(
