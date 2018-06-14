@@ -309,7 +309,7 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
         );
 
         const size_t WORKGROUP_SIZE = 32;
-        const size_t N_RAYS = 2;
+        const size_t N_RAYS = 8;
         auto workgroupsX = (extent.width / WORKGROUP_SIZE) + (extent.width % WORKGROUP_SIZE != 0);
         auto workgroupsY = (extent.height / WORKGROUP_SIZE) + (extent.height % WORKGROUP_SIZE != 0);
         buffer->dispatch(workgroupsX, workgroupsY, N_RAYS);

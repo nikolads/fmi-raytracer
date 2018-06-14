@@ -4,7 +4,7 @@
 const int WIDTH = 800;
 const int HEIGHT = 600;
 const int WORKGROUP_SIZE = 32;
-const int N_RAYS = 2;
+const int N_RAYS = 8;
 layout(local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 layout(binding = 0, rgba8) restrict uniform image2D work_image;
 
@@ -26,11 +26,14 @@ float sq(float x) {
 }
 
 /// Pick a random point in the unit disc with uniform probability.
-vec2 random_unit_disc_sample() {
-    // see http://mathworld.wolfram.com/DiskPointPicking.html
+vec2 unit_disc_sample() {
     float angle = sin_rand() * 2.0 * PI;
-	float rad = sqrt(sin_rand());
-	return vec2(sin(angle) * rad, cos(angle) * rad);
+	float r = sqrt(sin_rand());
+
+    float x = r * sin(angle);
+    float y = r * cos(angle);
+
+	return vec2(x, y);
 }
 
 /// Generates a random orthonormal basis based on an input vector.
@@ -109,12 +112,14 @@ struct Material {
     /// Determines how rough the surface of the material is at the microscopic level.
     /// Higher values mean smoother and more reflective material.
     ///
-    /// Must be between 1.0 and +inf.
+    /// Must be between 0.0 and +inf.
     float roughness;
 };
 
 vec3 material_brdf(Material material, vec3 w_in, vec3 w_out, vec3 normal);
 void material_spawn_ray(Material material, vec3 w_in, vec3 normal, out vec3 w_out, out vec3 color_mult);
+float material_ndf(Material material, float cos_angle);
+void material_ndf_sample(Material material, vec3 normal, out vec3 sampled, out float prob);
 
 struct Object {
     mat4 transform;
@@ -146,7 +151,7 @@ const Object SPHERES[2] = Object[2](
             0.0, 0.0, 3.33333, 0,
             1.33333, 0.66667, -5, 1
         ),
-        Material(vec3(0.8, 0.8, 0.8), vec3(0.05, 0.05, 0.05), 10, 64)
+        Material(vec3(0.0, 0.0, 0.0), vec3(1.00, 0.71, 0.29), 10, 16)
     ),
     // Object(
     //     mat4(
@@ -195,7 +200,7 @@ void main() {
     vec3 out_color = vec3(0.0, 0.0, 0.0);
     vec3 light_mult = vec3(1.0, 1.0, 1.0);
 
-    const vec3 BACKGROUND_COLOR = vec3(0.1, 0.1, 0.1);
+    const vec3 BACKGROUND_COLOR = vec3(0.05, 0.05, 0.05);
     const uint MAX_DEPTH = 4;
 
     for (uint i = 0; i < MAX_DEPTH; i++) {
@@ -232,7 +237,7 @@ void main() {
     out_color /= float(N_RAYS);
 
     vec4 image_color = imageLoad(work_image, ivec2(gl_GlobalInvocationID.xy));
-    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), image_color + vec4(out_color.bgr, 1.0));
+    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), image_color + vec4(out_color.bgr, 0.0));
 }
 
 Ray screen_ray(uvec2 pixel) {
@@ -281,19 +286,51 @@ vec3 material_brdf(Material material, vec3 w_in, vec3 w_out, vec3 normal) {
     vec3 halfv = normalize(w_in + w_out);
     vec3 spec = specular_reflection(material.spec_color, w_in, halfv);
     vec3 diff = (1 - spec) * material.diff_color;
-    float ndf = (material.roughness + 8) / (8 * PI) * pow(dot(normal, halfv), material.roughness);
+    float ndf = material_ndf(material, dot(normal, halfv));
 
     return (1 / PI) * diff + ndf * spec;
 }
 
 void material_spawn_ray(Material material, vec3 w_in, vec3 normal, out vec3 w_out, out vec3 color_mult) {
     // TODO: model refraction
-    // TODO: model roughness
 
     vec3 refl_prob = specular_reflection(material.spec_color, w_in, normal);
 
-    w_out = reflect(-w_in, normal);
-    color_mult = refl_prob;
+    vec3 mod_normal;
+    float mod_prob;
+    material_ndf_sample(material, normal, mod_normal, mod_prob);
+
+    w_out = reflect(-w_in, mod_normal);
+    color_mult = refl_prob * mod_prob;
+}
+
+/// Normal distribution function.
+///
+/// An NDF describes what the microgeometry of a surface looks like statistically.
+/// For a given angle θ it shows what part of the microfacets have a normal
+/// at a θ angle to the surface normal.
+float material_ndf(Material material, float cos_angle) {
+    float m = material.roughness;
+    return (m + 8) / (8 * PI) * pow(cos_angle, m);
+}
+
+/// Get a random vector in a hemisphere above `normal`, with a probability determined by the NDF.
+void material_ndf_sample(Material material, vec3 normal, out vec3 sampled, out float prob) {
+    float m = material.roughness;
+
+    // Ideally we would want to sample with the same probability as the NDF.
+    // However this will make the calculation too expensive.
+
+    // Here a very crude approximation is used - the unit disk is cut up to
+    // radius < f(m), then a uniform sample is taken from the rest.
+    float cutoff = 1 / (1.0 + m);
+    vec2 point = unit_disc_sample() * cutoff;
+
+    vec3 e2, e3;
+    orthonormal_system(normal, e2, e3);
+
+    sampled = normalize(normal + point.x * e2 + point.y * e3);
+    prob = material_ndf(material, dot(normal, sampled));
 }
 
 bool sphere_intersect(Object sphere, Ray ray, out vec3 intersection_point) {
