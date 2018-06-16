@@ -205,6 +205,12 @@ std::tuple<vk::UniquePipeline, vk::UniquePipelineLayout, vk::UniqueShaderModule>
     return std::make_tuple(std::move(pipeline), std::move(layout), std::move(shader));
 }
 
+void initialLayoutsBarrier(vk::CommandBuffer& buffer, const Queues& quques, vk::Image framebufferImage, vk::Image workImage);
+void transferLayoutsBarrier(vk::CommandBuffer& buffer, const Queues& queues, vk::Image workImage);
+void clearWorkImage(vk::CommandBuffer& buffer, vk::Image workImage);
+void blitImage(vk::CommandBuffer& buffer, vk::Image srcImage, vk::Image dstImage, vk::Extent2D extent);
+void presentLayoutBarrier(vk::CommandBuffer& buffer, const Queues& queues, vk::Image image);
+
 std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCommands(
     vk::Device device, vk::SwapchainKHR swapchain, const Queues& queues, vk::Pipeline pipeline,
     vk::PipelineLayout pipelineLayout, vk::DescriptorSet descriptorSet, vk::Image workImage,
@@ -249,64 +255,8 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
             nullptr                                 // pDynamicOffsets
         );
 
-        const auto initialLayouts = make_array(
-            vk::ImageMemoryBarrier(
-                vk::AccessFlags(),                      // srcAccessMask
-                vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
-                vk::ImageLayout::eUndefined,            // oldLayout
-                vk::ImageLayout::eTransferDstOptimal,   // newLayout
-                queues.computeQueueFamily,              // srcQueueFamilyIndex
-                queues.computeQueueFamily,              // dstQueueFamilyIndex
-                image,                                  // image
-                vk::ImageSubresourceRange(              // subresourceRange
-                    vk::ImageAspectFlagBits::eColor,        // aspectMask
-                    0,                                      // baseMipLevel
-                    1,                                      // levelCount
-                    0,                                      // baseArrayLayer
-                    1                                       // layerCount
-                )
-            ),
-            vk::ImageMemoryBarrier(
-                vk::AccessFlags(),                      // srcAccessMask
-                vk::AccessFlagBits::eMemoryWrite |
-                    vk::AccessFlagBits::eShaderRead |
-                    vk::AccessFlagBits::eShaderWrite,       // dstAccessMask
-                vk::ImageLayout::eUndefined,            // oldLayout
-                vk::ImageLayout::eGeneral,              // newLayout
-                queues.computeQueueFamily,              // srcQueueFamilyIndex
-                queues.computeQueueFamily,              // dstQueueFamilyIndex
-                workImage,                              // image
-                vk::ImageSubresourceRange(              // subresourceRange
-                    vk::ImageAspectFlagBits::eColor,        // aspectMask
-                    0,                                      // baseMipLevel
-                    1,                                      // levelCount
-                    0,                                      // baseArrayLayer
-                    1                                       // layerCount
-                )
-            )
-        );
-
-        buffer->pipelineBarrier(
-            vk::PipelineStageFlagBits::eTopOfPipe,      // srcStageMask
-            vk::PipelineStageFlagBits::eComputeShader,  // dstStageMask
-            vk::DependencyFlags(),                      // dependencyFlags
-            0,                                          // memoryBarrierCount
-            nullptr,                                    // pMemoryBarriers
-            0,                                          // bufferMemoryBarrierCount
-            nullptr,                                    // pBufferMemoryBarriers
-            initialLayouts.size(),                      // imageMemoryBarrierCount
-            initialLayouts.data()                       // pImageMemoryBarriers
-        );
-
-        auto clearRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-        auto clearColor = vk::ClearColorValue(make_array(0.0f, 0.0f, 0.0f, 1.0f));
-        buffer->clearColorImage(
-            workImage,                                  // image
-            vk::ImageLayout::eGeneral,                  // imageLayout
-            &clearColor,                                // pColor
-            1,                                          // rangeCount
-            &clearRange                                 // pRange
-        );
+        initialLayoutsBarrier(*buffer, queues, image, workImage);
+        clearWorkImage(*buffer, workImage);
 
         const size_t WORKGROUP_SIZE = 32;
         const size_t N_RAYS = 4;
@@ -314,11 +264,45 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
         auto workgroupsY = (extent.height / WORKGROUP_SIZE) + (extent.height % WORKGROUP_SIZE != 0);
         buffer->dispatch(workgroupsX, workgroupsY, N_RAYS);
 
-        const auto generalToTransfer = vk::ImageMemoryBarrier(
+        // change workImage from General to TransferSrc layout.
+        transferLayoutsBarrier(*buffer, queues, workImage);
+
+        blitImage(*buffer, workImage, image, extent);
+
+        // change image from TransferDst to PresentOptimal layout.
+        presentLayoutBarrier(*buffer, queues, image);
+
+        buffer->end();
+    }
+
+    return std::make_tuple(std::move(pool), std::move(buffers));
+}
+
+void initialLayoutsBarrier(vk::CommandBuffer& buffer, const Queues& queues, vk::Image framebufferImage, vk::Image workImage) {
+    const auto initialLayouts = make_array(
+        vk::ImageMemoryBarrier(
             vk::AccessFlags(),                      // srcAccessMask
             vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
-            vk::ImageLayout::eGeneral,              // oldLayout
-            vk::ImageLayout::eTransferSrcOptimal,   // newLayout
+            vk::ImageLayout::eUndefined,            // oldLayout
+            vk::ImageLayout::eTransferDstOptimal,   // newLayout
+            queues.computeQueueFamily,              // srcQueueFamilyIndex
+            queues.computeQueueFamily,              // dstQueueFamilyIndex
+            framebufferImage,                       // image
+            vk::ImageSubresourceRange(              // subresourceRange
+                vk::ImageAspectFlagBits::eColor,        // aspectMask
+                0,                                      // baseMipLevel
+                1,                                      // levelCount
+                0,                                      // baseArrayLayer
+                1                                       // layerCount
+            )
+        ),
+        vk::ImageMemoryBarrier(
+            vk::AccessFlags(),                      // srcAccessMask
+            vk::AccessFlagBits::eMemoryWrite |
+                vk::AccessFlagBits::eShaderRead |
+                vk::AccessFlagBits::eShaderWrite,   // dstAccessMask
+            vk::ImageLayout::eUndefined,            // oldLayout
+            vk::ImageLayout::eGeneral,              // newLayout
             queues.computeQueueFamily,              // srcQueueFamilyIndex
             queues.computeQueueFamily,              // dstQueueFamilyIndex
             workImage,                              // image
@@ -329,84 +313,127 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
                 0,                                      // baseArrayLayer
                 1                                       // layerCount
             )
-        );
+        )
+    );
 
-        buffer->pipelineBarrier(
-            vk::PipelineStageFlagBits::eComputeShader,  // srcStageMask
-            vk::PipelineStageFlagBits::eBottomOfPipe,   // dstStageMask
-            vk::DependencyFlags(),                      // dependencyFlags
-            0,                                          // memoryBarrierCount
-            nullptr,                                    // pMemoryBarriers
-            0,                                          // bufferMemoryBarrierCount
-            nullptr,                                    // pBufferMemoryBarriers
-            1,                                          // imageMemoryBarrierCount
-            &generalToTransfer                          // pImageMemoryBarriers
-        );
-
-        const auto offsets = make_array(
-            vk::Offset3D(0, 0, 0),
-            vk::Offset3D(extent.width, extent.height, 1));
-
-        const auto copyInfo = vk::ImageBlit(
-            vk::ImageSubresourceLayers(                     // srcSubresource
-                vk::ImageAspectFlagBits::eColor,                // aspectMask
-                0,                                              // mipLevel
-                0,                                              // baseArrayLayer
-                1                                               // layerCount
-            ),
-            offsets,                                        // srcOffsets
-            vk::ImageSubresourceLayers(                     // dstSubresource
-                vk::ImageAspectFlagBits::eColor,                // aspectMask
-                0,                                              // mipLevel
-                0,                                              // baseArrayLayer
-                1                                               // layerCount
-            ),
-            offsets                                         // dstOffsets
-        );
-
-        buffer->blitImage(
-            workImage,                              // srcImage
-            vk::ImageLayout::eTransferSrcOptimal,   // srcImageLayout
-            image,                                  // dstImage
-            vk::ImageLayout::eTransferDstOptimal,   // dstImageLayout
-            1,                                      // regionCount
-            &copyInfo,                              // pRegions
-            vk::Filter::eNearest                    // filter
-        );
-
-        const auto transferToPresent = vk::ImageMemoryBarrier(
-            vk::AccessFlagBits::eShaderRead,            // srcAccessMask
-            vk::AccessFlagBits::eMemoryWrite,           // dstAccessMask
-            vk::ImageLayout::eTransferDstOptimal,       // oldLayout
-            vk::ImageLayout::ePresentSrcKHR,            // newLayout
-            queues.computeQueueFamily,                  // srcQueueFamilyIndex
-            queues.computeQueueFamily,                  // dstQueueFamilyIndex
-            image,                                      // image
-            vk::ImageSubresourceRange(                  // subresourceRange
-                vk::ImageAspectFlagBits::eColor,            // aspectMask
-                0,                                          // baseMipLevel
-                1,                                          // levelCount
-                0,                                          // baseArrayLayer
-                1                                           // layerCount
-            )
-        );
-
-        buffer->pipelineBarrier(
-            vk::PipelineStageFlagBits::eComputeShader,  // srcStageMask
-            vk::PipelineStageFlagBits::eBottomOfPipe,   // dstStageMask
-            vk::DependencyFlags(),                      // dependencyFlags
-            0,                                          // memoryBarrierCount
-            nullptr,                                    // pMemoryBarriers
-            0,                                          // bufferMemoryBarrierCount
-            nullptr,                                    // pBufferMemoryBarriers
-            1,                                          // imageMemoryBarrierCount
-            &transferToPresent                          // pImageMemoryBarriers
-        );
-
-        buffer->end();
-    }
-
-    return std::make_tuple(std::move(pool), std::move(buffers));
+    buffer.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTopOfPipe,      // srcStageMask
+        vk::PipelineStageFlagBits::eComputeShader,  // dstStageMask
+        vk::DependencyFlags(),                      // dependencyFlags
+        0,                                          // memoryBarrierCount
+        nullptr,                                    // pMemoryBarriers
+        0,                                          // bufferMemoryBarrierCount
+        nullptr,                                    // pBufferMemoryBarriers
+        initialLayouts.size(),                      // imageMemoryBarrierCount
+        initialLayouts.data()                       // pImageMemoryBarriers
+    );
 }
 
+void clearWorkImage(vk::CommandBuffer& buffer, vk::Image workImage) {
+    auto clearRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+    auto clearColor = vk::ClearColorValue(make_array(0.0f, 0.0f, 0.0f, 1.0f));
+    buffer.clearColorImage(
+        workImage,                                  // image
+        vk::ImageLayout::eGeneral,                  // imageLayout
+        &clearColor,                                // pColor
+        1,                                          // rangeCount
+        &clearRange                                 // pRange
+    );
 }
+
+void transferLayoutsBarrier(vk::CommandBuffer& buffer, const Queues& queues, vk::Image workImage) {
+    const auto generalToTransfer = vk::ImageMemoryBarrier(
+        vk::AccessFlags(),                      // srcAccessMask
+        vk::AccessFlagBits::eMemoryWrite,       // dstAccessMask
+        vk::ImageLayout::eGeneral,              // oldLayout
+        vk::ImageLayout::eTransferSrcOptimal,   // newLayout
+        queues.computeQueueFamily,              // srcQueueFamilyIndex
+        queues.computeQueueFamily,              // dstQueueFamilyIndex
+        workImage,                              // image
+        vk::ImageSubresourceRange(              // subresourceRange
+            vk::ImageAspectFlagBits::eColor,        // aspectMask
+            0,                                      // baseMipLevel
+            1,                                      // levelCount
+            0,                                      // baseArrayLayer
+            1                                       // layerCount
+        )
+    );
+
+    buffer.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,  // srcStageMask
+        vk::PipelineStageFlagBits::eBottomOfPipe,   // dstStageMask
+        vk::DependencyFlags(),                      // dependencyFlags
+        0,                                          // memoryBarrierCount
+        nullptr,                                    // pMemoryBarriers
+        0,                                          // bufferMemoryBarrierCount
+        nullptr,                                    // pBufferMemoryBarriers
+        1,                                          // imageMemoryBarrierCount
+        &generalToTransfer                          // pImageMemoryBarriers
+    );
+}
+
+void blitImage(vk::CommandBuffer& buffer, vk::Image srcImage, vk::Image dstImage, vk::Extent2D extent) {
+    const auto offsets = make_array(
+        vk::Offset3D(0, 0, 0),
+        vk::Offset3D(extent.width, extent.height, 1));
+
+    const auto copyInfo = vk::ImageBlit(
+        vk::ImageSubresourceLayers(                     // srcSubresource
+            vk::ImageAspectFlagBits::eColor,                // aspectMask
+            0,                                              // mipLevel
+            0,                                              // baseArrayLayer
+            1                                               // layerCount
+        ),
+        offsets,                                        // srcOffsets
+        vk::ImageSubresourceLayers(                     // dstSubresource
+            vk::ImageAspectFlagBits::eColor,                // aspectMask
+            0,                                              // mipLevel
+            0,                                              // baseArrayLayer
+            1                                               // layerCount
+        ),
+        offsets                                         // dstOffsets
+    );
+
+    buffer.blitImage(
+        srcImage,                               // srcImage
+        vk::ImageLayout::eTransferSrcOptimal,   // srcImageLayout
+        dstImage,                               // dstImage
+        vk::ImageLayout::eTransferDstOptimal,   // dstImageLayout
+        1,                                      // regionCount
+        &copyInfo,                              // pRegions
+        vk::Filter::eNearest                    // filter
+    );
+}
+
+void presentLayoutBarrier(vk::CommandBuffer& buffer, const Queues& queues, vk::Image image) {
+    const auto transferToPresent = vk::ImageMemoryBarrier(
+        vk::AccessFlagBits::eShaderRead,            // srcAccessMask
+        vk::AccessFlagBits::eMemoryWrite,           // dstAccessMask
+        vk::ImageLayout::eTransferDstOptimal,       // oldLayout
+        vk::ImageLayout::ePresentSrcKHR,            // newLayout
+        queues.computeQueueFamily,                  // srcQueueFamilyIndex
+        queues.computeQueueFamily,                  // dstQueueFamilyIndex
+        image,                                      // image
+        vk::ImageSubresourceRange(                  // subresourceRange
+            vk::ImageAspectFlagBits::eColor,            // aspectMask
+            0,                                          // baseMipLevel
+            1,                                          // levelCount
+            0,                                          // baseArrayLayer
+            1                                           // layerCount
+        )
+    );
+
+    buffer.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,  // srcStageMask
+        vk::PipelineStageFlagBits::eBottomOfPipe,   // dstStageMask
+        vk::DependencyFlags(),                      // dependencyFlags
+        0,                                          // memoryBarrierCount
+        nullptr,                                    // pMemoryBarriers
+        0,                                          // bufferMemoryBarrierCount
+        nullptr,                                    // pBufferMemoryBarriers
+        1,                                          // imageMemoryBarrierCount
+        &transferToPresent                          // pImageMemoryBarriers
+    );
+}
+
+} // end namespace app
