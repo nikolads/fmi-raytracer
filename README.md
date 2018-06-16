@@ -24,11 +24,11 @@ List of features:
 
 - `Vulkan` and `Vulkan.hpp` - graphics and compute
 - `Glfw3` - window creation
-- `glsllangValidator` - to compile GLSL to SPIR-V
+- `glsllangValidator` - compiler from GLSL to SPIR-V
 
 ## Building
 
-This project comes with a somewhat convoluted `make` + `cmake` build script, which will only work with `clang` or `g++` because of hardcoded compiler flags and will probably only work on Linux.
+This project comes with an adhoc `make` + `cmake` build script, which will only work with `clang` or `g++` because of hardcoded compiler flags and will probably only work on Linux.
 
 - install `vulakn`, `glfw3` and `glsllangValidator` system-wide. `Vulkan.hpp` is automatically downloaded by the makefile.
 
@@ -44,4 +44,4 @@ This project comes with a somewhat convoluted `make` + `cmake` build script, whi
     make run PROFILE=release
     ```
 
-I may fix it someday when I find an adequate build system for C++
+I may fix it someday if I find an adequate build system for C++.
