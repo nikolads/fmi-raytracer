@@ -4,7 +4,7 @@
 const int WIDTH = 800;
 const int HEIGHT = 600;
 const int WORKGROUP_SIZE = 32;
-const int N_RAYS = 8;
+const int N_RAYS = 4;
 layout(local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
 layout(binding = 0, rgba32f) restrict uniform image2D work_image;
 
@@ -97,8 +97,9 @@ struct Material {
 
     /// Index of refraction of the material.
     ///
-    /// Should be compatible with `spec_color`.
     /// Used for refracting rays through transperent materials.
+    /// Must be 0.0 for non-transperent materials.
+    /// Should be compatible with `spec_color`.
     float refr_index;
 
     /// Arbitrary parameter for specular reflections.
@@ -134,7 +135,7 @@ vec3 point_light_sample(PointLight light);
 IntersectionInfo trace_ray(Ray ray);
 vec3 trace_shadow_ray(Ray ray, IntersectionInfo intersection, vec3 obj_normal, Material obj_material);
 
-const Object SPHERES[2] = Object[2](
+const Object SPHERES[3] = Object[3](
     Object(
         mat4(
             0.3, 0.0, 0.0, 0,
@@ -148,7 +149,7 @@ const Object SPHERES[2] = Object[2](
             0.0, 0.0, 3.33333, 0,
             1.33333, 0.66667, -5, 1
         ),
-        Material(vec3(0.0, 0.0, 0.0), vec3(1.00, 0.71, 0.29), 10, 16)
+        Material(vec3(0.0, 0.0, 0.0), vec3(1.00, 0.71, 0.29), 0.0, 16)
     ),
     Object(
         mat4(
@@ -163,7 +164,22 @@ const Object SPHERES[2] = Object[2](
             0.0, 0.0, 3.33333, 0,
             -1.33333, 0.66667, -5, 1
         ),
-        Material(vec3(0.8, 0.2, 0.2), vec3(0.05, 0.05, 0.05), 10, 8)
+        Material(vec3(0.8, 0.2, 0.2), vec3(0.05, 0.05, 0.05), 0.0, 8)
+    ),
+    Object(
+        mat4(
+            0.2, 0.0, 0.0, 0,
+            0.0, 0.2, 0.0, 0,
+            0.0, 0.0, 0.2, 0,
+            0.2, -0.2, 0.5, 1
+        ),
+        mat4(
+            5, 0.0, 0.0, 0,
+            0.0, 5, 0.0, 0,
+            0.0, 0.0, 5, 0,
+            -1, 1, -2.5, 1
+        ),
+        Material(vec3(0.0, 0.0, 0.0), vec3(0.03, 0.03, 0.03), 1.4, 64)
     )
 );
 
@@ -183,13 +199,20 @@ void main() {
     vec3 light_mult = vec3(1.0, 1.0, 1.0);
 
     const vec3 BACKGROUND_COLOR = vec3(0.05, 0.05, 0.05);
-    const uint MAX_DEPTH = 4;
+    const uint MAX_DEPTH = 6;
 
     for (uint i = 0; i < MAX_DEPTH; i++) {
         IntersectionInfo intersect = trace_ray(ray);
 
+        // imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(
+        //     intersect.object == 0,
+        //     intersect.object == 1,
+        //     intersect.object == 2,
+        //     0.0));
+
         if (intersect.object == -1) {
             out_color += BACKGROUND_COLOR * light_mult;
+            // imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(1.0, 1.0, 1.0, 0.0));
             break;
         }
 
@@ -246,7 +269,6 @@ IntersectionInfo trace_ray(Ray ray) {
     return info;
 }
 
-
 /// Trace ray from intersection to a light source.
 vec3 trace_shadow_ray(Ray ray, IntersectionInfo intersect, vec3 obj_normal, Material obj_material) {
     vec3 light_sample = point_light_sample(LIGHTS[0]);
@@ -281,16 +303,45 @@ vec3 material_brdf(Material material, vec3 w_in, vec3 w_out, vec3 normal) {
 }
 
 void material_spawn_ray(Material material, vec3 w_in, vec3 normal, out vec3 w_out, out vec3 color_mult) {
-    // TODO: model refraction
+    float n;
 
-    vec3 refl_prob = specular_reflection(material.spec_color, w_in, normal);
+    if (dot(w_in, normal) >= 0.0) {
+        n = 1.0 / material.refr_index;
+    } else {
+        n = material.refr_index / 1.0;
+        normal = -normal;
+    }
 
     vec3 mod_normal;
     float mod_prob;
     material_ndf_sample(material, normal, mod_normal, mod_prob);
 
-    w_out = reflect(-w_in, mod_normal);
-    color_mult = refl_prob * mod_prob;
+    float w = n * dot(w_in, mod_normal);
+    float k = sqrt(1 + (w - n) * (w + n));
+    vec3 w_trans = (w - k) * mod_normal - n * w_in;
+
+    vec3 refl_color;
+
+    // TODO: `normal` or `mod_normal`?
+    if (dot(w_in, normal) >= 0.0) {
+        refl_color = specular_reflection(material.spec_color, w_in, normal);
+    } else {
+        refl_color = specular_reflection(material.spec_color, w_trans, -normal);
+    }
+
+    // always refract the ray if the material is transparent and refraction is possible
+    // (i.e. angle is bellow the critical angle for full internal reflection)
+    if (material.refr_index == 0.0 || length(refl_color) > 3.0) {
+        // reflect
+        w_out = reflect(-w_in, mod_normal);
+        color_mult = refl_color * mod_prob;
+    } else {
+        // refract
+        w_out = w_trans;
+        color_mult = (1 - refl_color);
+        // TODO: should be
+        // color_mult = (1 - refl_color) * mod_prob;
+    }
 }
 
 /// Normal distribution function.
