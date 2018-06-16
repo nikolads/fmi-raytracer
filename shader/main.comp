@@ -21,10 +21,6 @@ float sin_rand() {
     return fract(sin(sn) * 43758.5453);
 }
 
-float sq(float x) {
-    return x * x;
-}
-
 /// Pick a random point in the unit disc with uniform probability.
 vec2 unit_disc_sample() {
     float angle = sin_rand() * 2.0 * PI;
@@ -57,8 +53,8 @@ void orthonormal_system(vec3 in_ray, out vec3 ray1, out vec3 ray2) {
     }
 }
 
-// uses Schlick's approximation
 vec3 specular_reflection(vec3 color, vec3 w_in, vec3 normal) {
+    // Schlick's approximation
     float cos_term = 1 - dot(w_in, normal);
     float cos_term_pow2 = cos_term * cos_term;
     float cos_term_pow4 = cos_term_pow2 * cos_term_pow2;
@@ -79,8 +75,6 @@ struct IntersectionInfo {
     vec3 point;
     float dist;
 };
-
-IntersectionInfo trace_ray(Ray ray);
 
 struct Material {
     /// Diffuse color.
@@ -137,6 +131,9 @@ struct PointLight {
 
 vec3 point_light_sample(PointLight light);
 
+IntersectionInfo trace_ray(Ray ray);
+vec3 trace_shadow_ray(Ray ray, IntersectionInfo intersection, vec3 obj_normal, Material obj_material);
+
 const Object SPHERES[2] = Object[2](
     Object(
         mat4(
@@ -153,21 +150,6 @@ const Object SPHERES[2] = Object[2](
         ),
         Material(vec3(0.0, 0.0, 0.0), vec3(1.00, 0.71, 0.29), 10, 16)
     ),
-    // Object(
-    //     mat4(
-    //         0.2, 0.0, 0.0, 0,
-    //         0.0, 0.2, 0.0, 0,
-    //         0.0, 0.0, 0.2, 0,
-    //         -0.5, -0.2, 1.5, 1
-    //     ),
-    //     mat4(
-    //         5, 0.0, 0.0, 0,
-    //         0.0, 5, 0.0, 0,
-    //         0.0, 0.0, 5, 0,
-    //         2.5, 1, -7.5, 1
-    //     ),
-    //     Material(1000, 0.0, vec3(0, 0, 0))
-    // ),
     Object(
         mat4(
             0.3, 0.0, 0.0, 0,
@@ -214,22 +196,12 @@ void main() {
         Object obj = SPHERES[intersect.object];
         vec3 obj_normal = sphere_normal(obj, intersect.point);
 
-        // Trace ray from intersection to a light source
-        vec3 light_sample = point_light_sample(LIGHTS[0]);
-        float dist_to_light = distance(light_sample, intersect.point);
-        Ray light_ray = Ray(intersect.point + 0.000061035 * obj_normal, normalize(light_sample - intersect.point));
-        IntersectionInfo light_intersect = trace_ray(light_ray);
+        out_color += trace_shadow_ray(ray, intersect, obj_normal, obj.material) * light_mult;
 
-        if (dist_to_light < light_intersect.dist) {
-            vec3 brdf_color = material_brdf(obj.material, -ray.dir, light_ray.dir, obj_normal);
-            out_color += LIGHTS[0].color * brdf_color * light_mult * dot(light_ray.dir, obj_normal);
-        }
-
-        // Continue tracing the original ray
+        // Bounce the original ray
         vec3 w_out;
         vec3 color_mult;
         material_spawn_ray(obj.material, -ray.dir, obj_normal, w_out, color_mult);
-
         ray = Ray(intersect.point + 0.000061035 * w_out, w_out);
         light_mult *= color_mult;
     }
@@ -272,6 +244,23 @@ IntersectionInfo trace_ray(Ray ray) {
     }
 
     return info;
+}
+
+
+/// Trace ray from intersection to a light source.
+vec3 trace_shadow_ray(Ray ray, IntersectionInfo intersect, vec3 obj_normal, Material obj_material) {
+    vec3 light_sample = point_light_sample(LIGHTS[0]);
+    float dist_to_light = distance(light_sample, intersect.point);
+
+    Ray light_ray = Ray(intersect.point + 0.000061035 * obj_normal, normalize(light_sample - intersect.point));
+    IntersectionInfo light_intersect = trace_ray(light_ray);
+
+    if (dist_to_light < light_intersect.dist) {
+        vec3 brdf_color = material_brdf(obj_material, -ray.dir, light_ray.dir, obj_normal);
+        return LIGHTS[0].color * brdf_color * dot(light_ray.dir, obj_normal);
+    } else {
+        return vec3(0.0, 0.0, 0.0);
+    }
 }
 
 /// Calculate brdf value.
