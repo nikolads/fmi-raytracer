@@ -198,4 +198,4 @@ std::vector<vk::UniqueImageView> createImageViews(vk::Device device, vk::Swapcha
     return views;
 }
 
-}
+} // namespace app

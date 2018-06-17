@@ -436,4 +436,4 @@ void presentLayoutBarrier(vk::CommandBuffer& buffer, const Queues& queues, vk::I
     );
 }
 
-} // end namespace app
+} // namespace app

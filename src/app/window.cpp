@@ -29,4 +29,4 @@ vk::UniqueSurfaceKHR createSurface(GLFWwindow* window, vk::Instance instance) {
     return vk::createResultValue(result, surface, "glfwCreateWindowSurface", deleter);
 }
 
-}
+} // namespace app

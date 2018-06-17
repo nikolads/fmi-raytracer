@@ -1,6 +1,6 @@
 # FMI Raytracer
 
-A university project to make a GPU raytracer.
+University project to make a GPU raytracer.
 
 This is a work in progress. Currently it can only render a set of spheres hardcoded in the shader.
 In addition most of the parameters for Vulkan are hardcoded and picked just so that it runs on the hardware I am testing on.
@@ -12,13 +12,10 @@ A compute shader is used to trace a ray for each pixel. The result is stored in 
 List of features:
 - [x] geometry: sphere
 - [ ] geometry: triangle mesh
-- [ ] geometry: binary function of other geometries
-- [x] material: single color
-- [ ] material: color texture
-- [ ] material: bump texture
+- [x] material: opaque object
+- [ ] material: transparent object
 - [x] light: point light
 - [ ] light: rectangle light
-- [ ] k-d tree or some other scene partitioning algorithm
 
 ## Dependencies
 
