@@ -6,9 +6,14 @@ const int HEIGHT = 600;
 const int WORKGROUP_SIZE = 32;
 const int N_RAYS = 4;
 layout(local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1) in;
+
 layout(binding = 0, rgba32f) restrict uniform image2D work_image;
+layout(binding = 1) buffer State {
+    uint invocation_id;
+};
 
 const float PI = 3.14159265358979323846264338327950288;
+const float EPS = 0.000061035;
 
 uint RNG_STATE = 0;
 
@@ -188,31 +193,28 @@ const PointLight LIGHTS[1] = PointLight[1](
     // PointLight(vec3(-0.9, -0.9, 0.6), vec3(1, 1, 3))
 );
 
+uvec3 update_state();
+
 void main() {
+    uvec3 invocation = update_state();
+    uvec2 global_invocation = invocation.xy * WORKGROUP_SIZE + gl_LocalInvocationID.xy;
+    RNG_STATE = invocation.z * 100;
+
     // In order to fit the work into workgroups, some unnecessary threads are launched.
-    if (gl_GlobalInvocationID.x >= WIDTH || gl_GlobalInvocationID.y >= HEIGHT) { return; }
+    if (global_invocation.x >= WIDTH || global_invocation.y >= HEIGHT) { return; }
 
-    RNG_STATE = gl_GlobalInvocationID.z * 1000;
-
-    Ray ray = screen_ray(gl_GlobalInvocationID.xy);
+    Ray ray = screen_ray(global_invocation.xy);
     vec3 out_color = vec3(0.0, 0.0, 0.0);
     vec3 light_mult = vec3(1.0, 1.0, 1.0);
 
     const vec3 BACKGROUND_COLOR = vec3(0.05, 0.05, 0.05);
-    const uint MAX_DEPTH = 6;
+    const uint MAX_DEPTH = 8;
 
     for (uint i = 0; i < MAX_DEPTH; i++) {
         IntersectionInfo intersect = trace_ray(ray);
 
-        // imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(
-        //     intersect.object == 0,
-        //     intersect.object == 1,
-        //     intersect.object == 2,
-        //     0.0));
-
         if (intersect.object == -1) {
             out_color += BACKGROUND_COLOR * light_mult;
-            // imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), vec4(1.0, 1.0, 1.0, 0.0));
             break;
         }
 
@@ -225,14 +227,38 @@ void main() {
         vec3 w_out;
         vec3 color_mult;
         material_spawn_ray(obj.material, -ray.dir, obj_normal, w_out, color_mult);
-        ray = Ray(intersect.point + 0.000061035 * w_out, w_out);
+        ray = Ray(intersect.point + EPS * w_out, w_out);
         light_mult *= color_mult;
     }
 
-    out_color /= float(N_RAYS);
+    // There is a possibility for a data race between loading and stoing the image value
+    // in which case the contribution from one of the rays will be ignored.
+    //
+    // The alpha component stores the number of rays whose contribution is accounted for
+    // (which can be less than the number of rays traced as per the race above).
+    // The RGB components store the averaged color contribution of those rays.
+    //
+    vec4 image_color = imageLoad(work_image, ivec2(global_invocation.xy));
+    image_color.rgb *= image_color.a / (image_color.a + 1);
+    out_color /= image_color.a + 1;
 
-    vec4 image_color = imageLoad(work_image, ivec2(gl_GlobalInvocationID.xy));
-    imageStore(work_image, ivec2(gl_GlobalInvocationID.xy), image_color + vec4(out_color, 0.0));
+    imageStore(work_image, ivec2(global_invocation), image_color + vec4(out_color, 1.0));
+}
+
+uvec3 update_state() {
+    const uvec3 INVOCATION_MAX = uvec3(
+        WIDTH / WORKGROUP_SIZE + uint(WIDTH % WORKGROUP_SIZE != 0),
+        HEIGHT / WORKGROUP_SIZE + uint(HEIGHT % WORKGROUP_SIZE != 0),
+        N_RAYS
+    );
+
+    uint id = atomicAdd(invocation_id, 1);
+
+    return uvec3(
+        id % INVOCATION_MAX.x,
+        id / INVOCATION_MAX.x % INVOCATION_MAX.y,
+        id / (INVOCATION_MAX.x * INVOCATION_MAX.y)
+    );
 }
 
 Ray screen_ray(uvec2 pixel) {
@@ -274,7 +300,7 @@ vec3 trace_shadow_ray(Ray ray, IntersectionInfo intersect, vec3 obj_normal, Mate
     vec3 light_sample = point_light_sample(LIGHTS[0]);
     float dist_to_light = distance(light_sample, intersect.point);
 
-    Ray light_ray = Ray(intersect.point + 0.000061035 * obj_normal, normalize(light_sample - intersect.point));
+    Ray light_ray = Ray(intersect.point + EPS * obj_normal, normalize(light_sample - intersect.point));
     IntersectionInfo light_intersect = trace_ray(light_ray);
 
     if (dist_to_light < light_intersect.dist) {

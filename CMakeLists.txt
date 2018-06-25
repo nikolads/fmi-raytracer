@@ -18,6 +18,7 @@ add_executable(raytrace
     src/app/device.cpp
     src/app/instance.cpp
     src/app/shader.cpp
+    src/app/util.cpp
     src/app/window.cpp
     src/main.cpp
 )

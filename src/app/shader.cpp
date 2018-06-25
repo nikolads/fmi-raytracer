@@ -41,18 +41,6 @@ std::vector<uint32_t> loadShader(const char* filename) {
     return code;
 }
 
-uint32_t findMemoryType(vk::PhysicalDevice physical, uint32_t mask, vk::MemoryPropertyFlags desired) {
-    auto available = physical.getMemoryProperties();
-
-    for (uint32_t i = 0; i < available.memoryTypeCount; i++) {
-        if ((mask & (1 << i)) && (available.memoryTypes[i].propertyFlags & desired) == desired) {
-            return i;
-        }
-    }
-
-    throw std::runtime_error("failed to find suitable memory type!");
-}
-
 std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createImage(
     vk::Device device, vk::PhysicalDevice physical, vk::Extent2D extent)
 {
@@ -105,13 +93,14 @@ std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createI
     return std::make_tuple(std::move(memory), std::move(image), std::move(view));
 }
 
-std::tuple<vk::UniqueDeviceMemory, vk::UniqueBuffer> createBuffer(vk::Device device, vk::PhysicalDevice physical) {
-    const auto bufferSize = 3 * sizeof(float);
-
+std::tuple<vk::UniqueDeviceMemory, vk::UniqueBuffer> createBuffer(vk::Device device, vk::PhysicalDevice physical,
+    size_t bufferSize)
+{
     const auto info = vk::BufferCreateInfo(
         vk::BufferCreateFlags(),                    // flags
         bufferSize,                                 // size
-        vk::BufferUsageFlagBits::eStorageBuffer,    // usage
+        vk::BufferUsageFlagBits::eStorageBuffer |
+            vk::BufferUsageFlagBits::eTransferDst,  // usage
         vk::SharingMode::eExclusive,                // sharingMode
         0,                                          // queueFamilyIndexCount
         nullptr                                     // pQueueFamilyIndices
@@ -303,13 +292,9 @@ std::tuple<vk::UniqueCommandPool, std::vector<vk::UniqueCommandBuffer>> createCo
         );
 
         initialLayoutsBarrier(*buffer, queues, image, workImage);
-        clearWorkImage(*buffer, workImage);
+        // clearWorkImage(*buffer, workImage);
 
-        const size_t WORKGROUP_SIZE = 32;
-        const size_t N_RAYS = 4;
-        auto workgroupsX = (extent.width / WORKGROUP_SIZE) + (extent.width % WORKGROUP_SIZE != 0);
-        auto workgroupsY = (extent.height / WORKGROUP_SIZE) + (extent.height % WORKGROUP_SIZE != 0);
-        buffer->dispatch(workgroupsX, workgroupsY, N_RAYS);
+        buffer->dispatch(1, 1, 1);
 
         // change workImage from General to TransferSrc layout.
         transferLayoutsBarrier(*buffer, queues, workImage);

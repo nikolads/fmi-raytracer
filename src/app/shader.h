@@ -2,13 +2,15 @@
 
 #include "deps.h"
 #include "device.h"
+#include "util.h"
 
 namespace app {
 
 std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createImage(
     vk::Device device, vk::PhysicalDevice physical, vk::Extent2D extent);
 
-std::tuple<vk::UniqueDeviceMemory, vk::UniqueBuffer> createBuffer(vk::Device device, vk::PhysicalDevice physical);
+std::tuple<vk::UniqueDeviceMemory, vk::UniqueBuffer> createBuffer(vk::Device device, vk::PhysicalDevice physical,
+    size_t bufferSize);
 
 vk::UniqueDescriptorSetLayout createDescriptorSetLayoyt(vk::Device device);
 

@@ -48,12 +48,14 @@ App App::create() {
     auto imageViews = createImageViews(*device, *swapchain, format);
     auto descriptorLayout = createDescriptorSetLayoyt(*device);
     auto [memory, workImage, workImageView] = createImage(*device, physical, extent);
-    auto [bufferMemory, stateBuffer] = createBuffer(*device, physical);
+    auto [bufferMemory, stateBuffer] = createBuffer(*device, physical, 3 * sizeof(uint32_t));
     auto [descriptorPool, descriptorSet] = createDescriptorSet(*device, *descriptorLayout, *workImageView, *stateBuffer);
     auto [pipeline, pipelineLayout, shader] = createPipeline(*device, *descriptorLayout);
     auto [cmdPool, cmdBuffers] = createCommands(*device, *swapchain, queues, *pipeline, *pipelineLayout,
         descriptorSet, *workImage, extent);
     auto imageAvailableSemaphore = device->createSemaphoreUnique(vk::SemaphoreCreateInfo(), nullptr);
+
+    zeroBuffer(*device, physical, *cmdPool, queues, *stateBuffer, 3 * sizeof(uint32_t));
 
     return App(std::move(window), std::move(instance), std::move(surface),
         std::move(device), queues, std::move(swapchain), std::move(descriptorLayout),
