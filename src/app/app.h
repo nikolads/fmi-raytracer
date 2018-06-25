@@ -18,8 +18,10 @@ private:
     vk::UniqueSwapchainKHR swapchain;
     vk::UniqueDescriptorSetLayout descriptorLayout;
     vk::UniqueDeviceMemory memory;
+    vk::UniqueDeviceMemory bufferMemory;
     vk::UniqueImage workImage;
     vk::UniqueImageView workImageView;
+    vk::UniqueBuffer stateBuffer;
     vk::UniqueDescriptorPool descriptorPool;
     vk::UniquePipeline pipeline;
     vk::UniquePipelineLayout pipelineLayout;
@@ -43,7 +45,8 @@ private:
     App(UniqueGlfwWindow&& window, vk::UniqueInstance&& instance, vk::UniqueSurfaceKHR&& surface,
         vk::UniqueDevice&& device, Queues queues, vk::UniqueSwapchainKHR&& swapchain,
         vk::UniqueDescriptorSetLayout&& descriptorLayout, vk::UniqueDeviceMemory&& memory,
-        vk::UniqueImage&& workImage, vk::UniqueImageView&& workImageView, vk::UniqueDescriptorPool&& descriptorPool,
+        vk::UniqueDeviceMemory&& bufferMemory, vk::UniqueImage&& workImage, vk::UniqueImageView&& workImageView,
+        vk::UniqueBuffer&& stateBuffer, vk::UniqueDescriptorPool&& descriptorPool,
         vk::UniquePipeline&& pipeline, vk::UniquePipelineLayout&& pipelineLayout,
         vk::UniqueCommandPool&& cmdPool, std::vector<vk::UniqueCommandBuffer>&& cmdBuffers,
         vk::UniqueSemaphore&& imageAvailableSemaphore);

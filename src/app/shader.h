@@ -8,10 +8,12 @@ namespace app {
 std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createImage(
     vk::Device device, vk::PhysicalDevice physical, vk::Extent2D extent);
 
+std::tuple<vk::UniqueDeviceMemory, vk::UniqueBuffer> createBuffer(vk::Device device, vk::PhysicalDevice physical);
+
 vk::UniqueDescriptorSetLayout createDescriptorSetLayoyt(vk::Device device);
 
 std::tuple<vk::UniqueDescriptorPool, vk::DescriptorSet> createDescriptorSet(
-    vk::Device device, vk::DescriptorSetLayout layout, vk::ImageView workImageView);
+    vk::Device device, vk::DescriptorSetLayout layout, vk::ImageView workImageView, vk::Buffer buffer);
 
 std::tuple<vk::UniquePipeline, vk::UniquePipelineLayout, vk::UniqueShaderModule> createPipeline(
     vk::Device device, vk::DescriptorSetLayout descriptorLayout);

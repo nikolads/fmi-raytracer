@@ -96,7 +96,7 @@ std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createI
             0,                                      // baseMipLevel
             1,                                      // levelCount
             0,                                      // baseArrayLayer
-            1                                       // layerCount
+            1                                       // layerCountauto memory = device.allocateMemoryUnique(allocInfo, nullptr);
         )
     );
 
@@ -105,33 +105,68 @@ std::tuple<vk::UniqueDeviceMemory, vk::UniqueImage, vk::UniqueImageView> createI
     return std::make_tuple(std::move(memory), std::move(image), std::move(view));
 }
 
-vk::UniqueDescriptorSetLayout createDescriptorSetLayoyt(vk::Device device) {
-    const auto binding = vk::DescriptorSetLayoutBinding(
-        0,                                      // binding
-        vk::DescriptorType::eStorageImage,      // descriptorType
-        1,                                      // descriptorCount
-        vk::ShaderStageFlagBits::eCompute,      // stageFlags
-        nullptr                                 // pImmutableSamplers
+std::tuple<vk::UniqueDeviceMemory, vk::UniqueBuffer> createBuffer(vk::Device device, vk::PhysicalDevice physical) {
+    const auto bufferSize = 3 * sizeof(float);
+
+    const auto info = vk::BufferCreateInfo(
+        vk::BufferCreateFlags(),                    // flags
+        bufferSize,                                 // size
+        vk::BufferUsageFlagBits::eStorageBuffer,    // usage
+        vk::SharingMode::eExclusive,                // sharingMode
+        0,                                          // queueFamilyIndexCount
+        nullptr                                     // pQueueFamilyIndices
     );
+
+    auto buffer = device.createBufferUnique(info);
+
+    const auto allocInfo = vk::MemoryAllocateInfo(
+        bufferSize,
+        findMemoryType(physical, ~0, vk::MemoryPropertyFlagBits::eDeviceLocal)
+    );
+
+    auto memory = device.allocateMemoryUnique(allocInfo, nullptr);
+    device.bindBufferMemory(*buffer, *memory, 0);
+
+    return std::make_tuple(std::move(memory), std::move(buffer));
+}
+
+vk::UniqueDescriptorSetLayout createDescriptorSetLayoyt(vk::Device device) {
+    const auto bindings = make_array(
+        vk::DescriptorSetLayoutBinding(
+            0,                                      // binding
+            vk::DescriptorType::eStorageImage,      // descriptorType
+            1,                                      // descriptorCount
+            vk::ShaderStageFlagBits::eCompute,      // stageFlags
+            nullptr                                 // pImmutableSamplers
+        ),
+        vk::DescriptorSetLayoutBinding(
+            1,                                      // binding
+            vk::DescriptorType::eStorageBuffer,     // descriptorType
+            1,                                      // descriptorCount
+            vk::ShaderStageFlagBits::eCompute,      // stageFlags
+            nullptr                                 // pImmutableSamplers
+        ));
 
     const auto layoutInfo = vk::DescriptorSetLayoutCreateInfo(
         vk::DescriptorSetLayoutCreateFlags(),   // flags
-        1,                                      // bindingCount
-        &binding                                // pBindings
+        bindings.size(),                        // bindingCount
+        bindings.data()                         // pBindings
     );
 
     return device.createDescriptorSetLayoutUnique(layoutInfo, nullptr);
 }
 
 std::tuple<vk::UniqueDescriptorPool, vk::DescriptorSet> createDescriptorSet(
-    vk::Device device, vk::DescriptorSetLayout layout, vk::ImageView workImageView)
+    vk::Device device, vk::DescriptorSetLayout layout, vk::ImageView workImageView, vk::Buffer buffer)
 {
-    const auto poolSize = vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 1);
+    const auto poolSize = make_array(
+        vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 1),
+        vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1));
     const auto poolInfo = vk::DescriptorPoolCreateInfo(
         vk::DescriptorPoolCreateFlags(),        // flags
         1,                                      // maxSets
-        1,                                      // poolSizeCount
-        &poolSize                               // pPoolSizes
+        poolSize.size(),                        // poolSizeCount
+        poolSize.data()                         // pPoolSizes
     );
 
     auto pool = device.createDescriptorPoolUnique(poolInfo, nullptr);
@@ -146,18 +181,30 @@ std::tuple<vk::UniqueDescriptorPool, vk::DescriptorSet> createDescriptorSet(
     auto set = std::move(sets[0]);
 
     const auto imageInfo = vk::DescriptorImageInfo(nullptr, workImageView, vk::ImageLayout::eGeneral);
-    const auto writeInfo = vk::WriteDescriptorSet(
-        set,                                    // dstSet
-        0,                                      // dstBinding
-        0,                                      // dstArrayElement
-        1,                                      // descriptorCount
-        vk::DescriptorType::eStorageImage,      // descriptorType
-        &imageInfo,                             // pImageInfo
-        nullptr,                                // pBufferInfo
-        nullptr                                 // pTexelBufferView
-    );
+    const auto bufferInfo = vk::DescriptorBufferInfo(buffer, 0, VK_WHOLE_SIZE);
+    const auto writeInfo = make_array(
+        vk::WriteDescriptorSet(
+            set,                                    // dstSet
+            0,                                      // dstBinding
+            0,                                      // dstArrayElement
+            1,                                      // descriptorCount
+            vk::DescriptorType::eStorageImage,      // descriptorType
+            &imageInfo,                             // pImageInfo
+            nullptr,                                // pBufferInfo
+            nullptr                                 // pTexelBufferView
+        ),
+        vk::WriteDescriptorSet(
+            set,                                    // dstSet
+            1,                                      // dstBinding
+            0,                                      // dstArrayElement
+            1,                                      // descriptorCount
+            vk::DescriptorType::eStorageBuffer,     // descriptorType
+            nullptr,                                // pImageInfo
+            &bufferInfo,                            // pBufferInfo
+            nullptr                                 // pTexelBufferView
+        ));
 
-    device.updateDescriptorSets(1, &writeInfo, 0, nullptr);
+    device.updateDescriptorSets(writeInfo.size(), writeInfo.data(), 0, nullptr);
 
     return std::make_tuple(std::move(pool), std::move(set));
 }
